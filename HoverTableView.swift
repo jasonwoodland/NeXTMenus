@@ -10,6 +10,9 @@ class HoverTableView: NSTableView {
     override func mouseDown(with event: NSEvent) {
         print("HoverTableView mouseDown")
 
+        // Make the window key to ensure it receives events
+        self.window?.makeKey()
+
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
 
