@@ -5,6 +5,7 @@ struct MenuItem {
     let title: String
     let isEnabled: Bool
     let hasSubmenu: Bool
+    let isSeparator: Bool
     let element: AXUIElement?
     let submenuItems: [MenuItem]
 }
@@ -72,7 +73,7 @@ class MenuExtractor {
         let isEnabled = (enabledValue as? Bool) ?? true
 
         // For now, we'll extract submenus on-demand, not during initialization
-        return MenuItem(title: title, isEnabled: isEnabled, hasSubmenu: true, element: element, submenuItems: [])
+        return MenuItem(title: title, isEnabled: isEnabled, hasSubmenu: true, isSeparator: false, element: element, submenuItems: [])
     }
 
     // Extract submenu items on-demand from a menu bar item
@@ -139,6 +140,9 @@ class MenuExtractor {
             AXUIElementCopyAttributeValue(child, kAXTitleAttribute as CFString, &titleValue)
             let title = titleValue as? String ?? ""
 
+            // Check if this is a separator (empty title or contains only dashes/spaces)
+            let isSeparator = title.isEmpty || title.trimmingCharacters(in: .whitespaces).allSatisfy { $0 == "-" }
+
             // Get enabled state
             var enabledValue: AnyObject?
             AXUIElementCopyAttributeValue(child, kAXEnabledAttribute as CFString, &enabledValue)
@@ -149,7 +153,7 @@ class MenuExtractor {
             AXUIElementCopyAttributeValue(child, kAXChildrenAttribute as CFString, &childrenValue)
             let hasSubmenu = (childrenValue as? [AXUIElement])?.isEmpty == false
 
-            items.append(MenuItem(title: title, isEnabled: isEnabled, hasSubmenu: hasSubmenu, element: child, submenuItems: []))
+            items.append(MenuItem(title: title, isEnabled: isEnabled, hasSubmenu: hasSubmenu, isSeparator: isSeparator, element: child, submenuItems: []))
         }
 
         return items

@@ -284,6 +284,7 @@ class SubmenuWindowController: NSWindowController {
         // Hide child submenu first (unless they're torn off)
         childSubmenuController?.hideWindow()
         childSubmenuController = nil
+        childSubmenuRow = nil
 
         submenuWindow.orderOut(nil)
     }
@@ -306,28 +307,105 @@ extension SubmenuWindowController: NSTableViewDelegate {
         if cell == nil {
             cell = NSTableCellView()
             cell?.identifier = cellIdentifier
+            cell?.wantsLayer = true
 
-            let textField = NSTextField(frame: NSRect(x: 8, y: 0, width: windowWidth - 16, height: rowHeight))
+            // Add background view
+            let backgroundView = NSView(frame: CGRect(x: 0, y: 0, width: windowWidth, height: rowHeight))
+            backgroundView.wantsLayer = true
+            backgroundView.identifier = NSUserInterfaceItemIdentifier("BackgroundView")
+            backgroundView.autoresizingMask = [.width, .height]
+            cell?.addSubview(backgroundView)
+
+            // Calculate Y offset to center text vertically
+            let textHeight: CGFloat = 17
+            let yOffset = (rowHeight - textHeight) / 2
+
+            let textField = NSTextField(frame: NSRect(x: 8, y: yOffset, width: windowWidth - 16, height: textHeight))
             textField.isBordered = false
             textField.backgroundColor = .clear
             textField.isEditable = false
             textField.isSelectable = false
             textField.autoresizingMask = [.width]
+            textField.drawsBackground = false
+            textField.alignment = .left
+            textField.usesSingleLineMode = true
+            textField.lineBreakMode = .byTruncatingTail
 
             cell?.addSubview(textField)
             cell?.textField = textField
         }
 
+        // Check if this row has an open submenu
+        let isHighlighted = (childSubmenuRow == row)
+
+        // Update background view
+        if let backgroundView = cell?.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier("BackgroundView") }) {
+            if isHighlighted {
+                backgroundView.layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.3).cgColor
+            } else {
+                backgroundView.layer?.backgroundColor = NSColor.clear.cgColor
+            }
+        }
+
         let menuItem = menuItems[row]
-        cell?.textField?.stringValue = menuItem.title
-        cell?.textField?.font = NSFont.systemFont(ofSize: 13)
-        cell?.textField?.textColor = menuItem.isEnabled ? .labelColor : .disabledControlTextColor
+
+        // Handle separators
+        if menuItem.isSeparator {
+            cell?.textField?.isHidden = true
+
+            // Add separator line if not already added
+            let separatorId = NSUserInterfaceItemIdentifier("Separator")
+            if cell?.subviews.first(where: { $0.identifier == separatorId }) == nil {
+                let separator = NSBox(frame: NSRect(x: 8, y: rowHeight / 2 - 0.5, width: windowWidth - 16, height: 1))
+                separator.boxType = .separator
+                separator.identifier = separatorId
+                separator.autoresizingMask = [.width]
+                cell?.addSubview(separator)
+            }
+        } else {
+            cell?.textField?.isHidden = false
+            cell?.textField?.stringValue = menuItem.title
+            cell?.textField?.font = NSFont.systemFont(ofSize: 13)
+            cell?.textField?.textColor = menuItem.isEnabled ? .labelColor : .disabledControlTextColor
+
+            // Remove separator if it exists
+            let separatorId = NSUserInterfaceItemIdentifier("Separator")
+            cell?.subviews.first(where: { $0.identifier == separatorId })?.removeFromSuperview()
+        }
 
         return cell
     }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = NSTableRowView()
+        rowView.isEmphasized = false
+        return rowView
+    }
+
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        return true
+        // Don't allow selection of disabled items or separators
+        let menuItem = menuItems[row]
+        return menuItem.isEnabled && !menuItem.isSeparator
+    }
+
+    func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        // Update row background based on whether it has an open submenu
+        updateRowHighlight(forRow: row)
+    }
+
+    private func updateRowHighlight(forRow row: Int) {
+        guard let rowView = tableView.rowView(atRow: row, makeIfNecessary: false) else { return }
+        guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
+
+        let isHighlighted = (childSubmenuRow == row)
+
+        if isHighlighted {
+            rowView.isSelected = true
+            cellView.backgroundStyle = .emphasized
+        } else {
+            rowView.isSelected = false
+            cellView.backgroundStyle = .normal
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -344,6 +422,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
             childSubmenuController?.hideWindow()
             childSubmenuController = nil
             childSubmenuRow = nil
+
+            // Update all row highlights
+            for i in 0..<tableView.numberOfRows {
+                updateRowHighlight(forRow: i)
+            }
             return
         }
 
@@ -363,6 +446,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
                 )
                 childSubmenuController?.showWindow(rightOf: submenuWindow, alignedToRow: selectedRow)
                 childSubmenuRow = selectedRow
+
+                // Update all row highlights
+                for i in 0..<tableView.numberOfRows {
+                    updateRowHighlight(forRow: i)
+                }
             } else {
                 // No submenu - this is an action item, execute it
                 if let element = menuItem.element {
@@ -379,6 +467,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
                 childSubmenuController?.hideWindow()
                 childSubmenuController = nil
                 childSubmenuRow = nil
+
+                // Update all row highlights
+                for i in 0..<tableView.numberOfRows {
+                    updateRowHighlight(forRow: i)
+                }
             }
         } else {
             // No submenu - this is an action item, execute it
@@ -396,6 +489,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
             childSubmenuController?.hideWindow()
             childSubmenuController = nil
             childSubmenuRow = nil
+
+            // Update all row highlights
+            for i in 0..<tableView.numberOfRows {
+                updateRowHighlight(forRow: i)
+            }
         }
     }
 }
