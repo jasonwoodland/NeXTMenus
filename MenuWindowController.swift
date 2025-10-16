@@ -2,7 +2,7 @@ import Cocoa
 
 class MenuWindowController: NSWindowController {
     private var menuWindow: NSWindow!
-    private var tableView: NSTableView!
+    private var tableView: HoverTableView!
     private var menuItems: [MenuItem] = []
     private var appMenuItem: MenuItem?
     private var appName: String = ""
@@ -17,6 +17,7 @@ class MenuWindowController: NSWindowController {
 
     // Track window movement completion
     private var moveTimer: Timer?
+
 
     init(appName: String, appMenuItem: MenuItem?, menuItems: [MenuItem], targetApp: NSRunningApplication) {
         self.appName = appName
@@ -130,14 +131,13 @@ class MenuWindowController: NSWindowController {
         scrollView.backgroundColor = .clear
 
         // Create table view
-        tableView = NSTableView(frame: scrollView.bounds)
+        tableView = HoverTableView(frame: scrollView.bounds)
         tableView.autoresizingMask = [.width, .height]
         tableView.headerView = nil
         tableView.backgroundColor = .clear
         tableView.gridStyleMask = []
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.rowHeight = rowHeight
-        // tableView.selectionHighlightStyle = .none
 
         // Add a single column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("MenuItemColumn"))
@@ -148,11 +148,41 @@ class MenuWindowController: NSWindowController {
         tableView.delegate = self
         tableView.dataSource = self
 
+        // Set up hover callback for drag-over behavior
+        tableView.onMouseDraggedOverRow = { [weak self] row in
+            self?.handleMouseDraggedOverRow(row)
+        }
+
+        // Set up click callback
+        tableView.onMouseClickedRow = { [weak self] row in
+            self?.handleMouseClickedRow(row)
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
         // Add scroll view to window
         contentView.addSubview(scrollView)
+    }
+
+    private func handleMouseDraggedOverRow(_ row: Int) {
+        // Check if row is selectable (not disabled or separator)
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
+            return
+        }
+
+        // Get the menu item at this row
+        let menuItem: MenuItem?
+        if row == 0 {
+            menuItem = appMenuItem
+        } else {
+            menuItem = menuItems[row - 1]
+        }
+
+        // If it's different from current open submenu and not a separator, show it
+        if let menuItem = menuItem, row != childSubmenuRow, !menuItem.isSeparator {
+            showSubmenu(for: menuItem, at: row)
+        }
     }
 
     func showWindow() {
@@ -294,6 +324,26 @@ extension MenuWindowController: NSTableViewDelegate {
             rowView.isSelected = false
             cellView.backgroundStyle = .normal
         }
+    }
+
+    private func handleMouseClickedRow(_ row: Int) {
+        // Check if row is selectable (not disabled or separator)
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
+            return
+        }
+
+        // Get the menu item at this row
+        let menuItem: MenuItem?
+        if row == 0 {
+            menuItem = appMenuItem
+        } else {
+            menuItem = menuItems[row - 1]
+        }
+
+        guard let menuItem = menuItem else { return }
+
+        // Show submenu at the right edge of the window
+        showSubmenu(for: menuItem, at: row)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

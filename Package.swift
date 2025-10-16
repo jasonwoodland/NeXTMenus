@@ -27,7 +27,8 @@ let package = Package(
                 "MenuExtractor.swift",
                 "MenuWindowController.swift",
                 "SubmenuWindowController.swift",
-                "NonActivatingWindow.swift"
+                "NonActivatingWindow.swift",
+                "HoverTableView.swift"
             ]
         )
     ]

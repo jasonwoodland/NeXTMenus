@@ -2,7 +2,7 @@ import Cocoa
 
 class SubmenuWindowController: NSWindowController {
     private var submenuWindow: NSWindow!
-    private var tableView: NSTableView!
+    private var tableView: HoverTableView!
     private var menuItems: [MenuItem] = []
     private var title: String = ""
     private var targetApp: NSRunningApplication?
@@ -229,14 +229,13 @@ class SubmenuWindowController: NSWindowController {
         scrollView.backgroundColor = .clear
 
         // Create table view
-        tableView = NSTableView(frame: scrollView.bounds)
+        tableView = HoverTableView(frame: scrollView.bounds)
         tableView.autoresizingMask = [.width, .height]
         tableView.headerView = nil
         tableView.backgroundColor = .clear
         tableView.gridStyleMask = []
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.rowHeight = rowHeight
-        // tableView.selectionHighlightStyle = .none
 
         // Add a single column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("MenuItemColumn"))
@@ -247,11 +246,57 @@ class SubmenuWindowController: NSWindowController {
         tableView.delegate = self
         tableView.dataSource = self
 
+        // Set up hover callback for drag-over behavior
+        tableView.onMouseDraggedOverRow = { [weak self] row in
+            self?.handleMouseDraggedOverRow(row)
+        }
+
+        // Set up click callback
+        tableView.onMouseClickedRow = { [weak self] row in
+            self?.handleMouseClickedRow(row)
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
         // Add scroll view to window
         contentView.addSubview(scrollView)
+    }
+
+    private func handleMouseDraggedOverRow(_ row: Int) {
+        // Check if row is selectable (not disabled or separator)
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
+            return
+        }
+
+        let menuItem = menuItems[row]
+
+        // If it's different from current open submenu and not a separator, show it
+        if row != childSubmenuRow, !menuItem.isSeparator {
+            // Only open submenus on hover, don't execute actions
+            if menuItem.hasSubmenu, let element = menuItem.element {
+                let submenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
+
+                if !submenuItems.isEmpty {
+                    // Close any existing child submenu
+                    childSubmenuController?.hideWindow()
+
+                    // Create and show new child submenu
+                    childSubmenuController = SubmenuWindowController(
+                        title: menuItem.title,
+                        menuItems: submenuItems,
+                        targetApp: targetApp
+                    )
+                    childSubmenuController?.showWindow(rightOf: submenuWindow, alignedToRow: row)
+                    childSubmenuRow = row
+
+                    // Update all row highlights
+                    for i in 0..<tableView.numberOfRows {
+                        updateRowHighlight(forRow: i)
+                    }
+                }
+            }
+        }
     }
 
     func showWindow(rightOf parentWindow: NSWindow, alignedToRow row: Int? = nil) {
@@ -405,6 +450,84 @@ extension SubmenuWindowController: NSTableViewDelegate {
         } else {
             rowView.isSelected = false
             cellView.backgroundStyle = .normal
+        }
+    }
+
+    private func handleMouseClickedRow(_ row: Int) {
+        // Check if row is selectable (not disabled or separator)
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
+            return
+        }
+
+        let menuItem = menuItems[row]
+
+        // Check if clicking on the same item that's already open - toggle it closed
+        if childSubmenuRow == row {
+            childSubmenuController?.hideWindow()
+            childSubmenuController = nil
+            childSubmenuRow = nil
+
+            // Update all row highlights
+            for i in 0..<tableView.numberOfRows {
+                updateRowHighlight(forRow: i)
+            }
+            return
+        }
+
+        // If this item might have submenu items, extract them on-demand
+        if menuItem.hasSubmenu, let element = menuItem.element {
+            let submenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
+
+            if !submenuItems.isEmpty {
+                // Close any existing child submenu
+                childSubmenuController?.hideWindow()
+
+                // Create and show new child submenu
+                childSubmenuController = SubmenuWindowController(
+                    title: menuItem.title,
+                    menuItems: submenuItems,
+                    targetApp: targetApp
+                )
+                childSubmenuController?.showWindow(rightOf: submenuWindow, alignedToRow: row)
+                childSubmenuRow = row
+
+                // Update all row highlights
+                for i in 0..<tableView.numberOfRows {
+                    updateRowHighlight(forRow: i)
+                }
+            } else {
+                // No submenu - this is an action item, execute it
+                targetApp?.activate(options: [])
+                usleep(50000)
+                AXUIElementPerformAction(element, kAXPressAction as CFString)
+
+                // Close any open child submenu
+                childSubmenuController?.hideWindow()
+                childSubmenuController = nil
+                childSubmenuRow = nil
+
+                // Update all row highlights
+                for i in 0..<tableView.numberOfRows {
+                    updateRowHighlight(forRow: i)
+                }
+            }
+        } else {
+            // No submenu - this is an action item, execute it
+            if let element = menuItem.element {
+                targetApp?.activate(options: [])
+                usleep(50000)
+                AXUIElementPerformAction(element, kAXPressAction as CFString)
+            }
+
+            // Close any open child submenu
+            childSubmenuController?.hideWindow()
+            childSubmenuController = nil
+            childSubmenuRow = nil
+
+            // Update all row highlights
+            for i in 0..<tableView.numberOfRows {
+                updateRowHighlight(forRow: i)
+            }
         }
     }
 
