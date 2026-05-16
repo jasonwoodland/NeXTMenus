@@ -45,52 +45,29 @@ class SubmenuWindowController: NSWindowController {
     // Modifier key tracking
     private var currentModifierFlags: NSEvent.ModifierFlags = []
     private var modifierMonitor: Any?
+    private var menuItemsVersion = 0
+    private var visibleMenuItemsCache: (state: MenuModifierState, version: Int, items: [MenuItem])?
 
-    // Computed property to get visible menu items based on current modifiers
+    // Cached visible menu items based on current modifiers. Filtering is on
+    // hot table/highlight paths, so keep it O(n) and recompute only when the
+    // source menu or relevant modifier state changes.
     private var visibleMenuItems: [MenuItem] {
-        let hasOption = currentModifierFlags.contains(.option)
-        let hasShift = currentModifierFlags.contains(.shift)
-        let hasControl = currentModifierFlags.contains(.control)
-
-        // Filter out alternate items unless their required modifiers are pressed
-        let filtered = menuItems.filter { item in
-            // Always show separators
-            if item.isSeparator {
-                return true
-            }
-
-            // If it's marked as alternate
-            if item.isAlternate {
-                return hasOption || hasShift || hasControl
-            }
-
-            // Regular items - hide when modifiers are pressed if there's an alternate
-            // Check if next item is an alternate of this one
-            if let index = menuItems.firstIndex(where: { $0.element === item.element }),
-               index + 1 < menuItems.count {
-                let nextItem = menuItems[index + 1]
-                if nextItem.isAlternate && !nextItem.isSeparator {
-                    // This has an alternate, hide when modifiers pressed
-                    return !hasOption && !hasShift && !hasControl
-                }
-            }
-
-            // Regular items without alternates - always show
-            return true
+        let state = MenuModifierState(flags: currentModifierFlags)
+        if let cache = visibleMenuItemsCache,
+           cache.state == state,
+           cache.version == menuItemsVersion {
+            return cache.items
         }
 
-        // Collapse runs of separators into one, and drop leading/trailing ones
-        var result: [MenuItem] = []
-        for item in filtered {
-            if item.isSeparator && (result.last?.isSeparator ?? true) {
-                continue
-            }
-            result.append(item)
-        }
-        if result.last?.isSeparator == true {
-            result.removeLast()
-        }
-        return result
+        let items = MenuItemVisibility.visibleItems(from: menuItems,
+                                                    modifierState: state,
+                                                    trimSeparators: true)
+        visibleMenuItemsCache = (state, menuItemsVersion, items)
+        return items
+    }
+
+    private func invalidateVisibleMenuItemsCache() {
+        visibleMenuItemsCache = nil
     }
 
     // State management for menu interactions
@@ -179,11 +156,12 @@ class SubmenuWindowController: NSWindowController {
         submenuWindow.isMovableByWindowBackground = true
         submenuWindow.styleMask.insert(.fullSizeContentView)
 
-        // Enable translucent glass appearance with visible title
+        // Keep the title visible while using glass rendering by default.
+        // Low-power opaque drawing can be enabled with NEXTMENUS_LOW_POWER=1.
         submenuWindow.titlebarAppearsTransparent = true
         submenuWindow.titleVisibility = .visible
-        submenuWindow.isOpaque = false
-        submenuWindow.backgroundColor = .clear
+        submenuWindow.isOpaque = !NextMenusRendering.useGlassEffects
+        submenuWindow.backgroundColor = NextMenusRendering.useGlassEffects ? .clear : NextMenusRendering.windowBackgroundColor
 
         // Make sure window appears on all spaces
         submenuWindow.collectionBehavior = [.canJoinAllSpaces, .stationary]
@@ -331,6 +309,7 @@ class SubmenuWindowController: NSWindowController {
             let newModifierFlags = event.modifierFlags
             if self.currentModifierFlags != newModifierFlags {
                 self.currentModifierFlags = newModifierFlags
+                self.invalidateVisibleMenuItemsCache()
 
                 // Reload the table to show/hide alternate menu items
                 DispatchQueue.main.async {
@@ -347,6 +326,7 @@ class SubmenuWindowController: NSWindowController {
     // Called by parent window when modifiers change
     func updateModifierFlags(_ flags: NSEvent.ModifierFlags) {
         currentModifierFlags = flags
+        invalidateVisibleMenuItemsCache()
 
         // Re-extract submenu items when modifiers change
         // This is necessary because macOS provides different items based on modifiers
@@ -354,6 +334,8 @@ class SubmenuWindowController: NSWindowController {
             let newSubmenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
             if !newSubmenuItems.isEmpty {
                 self.menuItems = newSubmenuItems
+                menuItemsVersion += 1
+                invalidateVisibleMenuItemsCache()
             }
         }
 
@@ -772,6 +754,8 @@ class SubmenuWindowController: NSWindowController {
 
         self.title = title
         self.menuItems = menuItems
+        menuItemsVersion += 1
+        invalidateVisibleMenuItemsCache()
         self.parentMenuItem = parentMenuItem
         self.hoveredRow = nil
         self.isDragging = false
@@ -982,17 +966,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
             cell?.identifier = cellIdentifier
             cell?.wantsLayer = true
 
-            // Rounded selection highlight - a material fill, shown/hidden by
+            // Rounded selection highlight, shown/hidden by
             // updateRowHighlight(). Full row height (no gap between items).
-            let backgroundView = NSVisualEffectView(frame: CGRect(x: 6, y: 0, width: windowWidth - 12, height: rowHeight))
-            backgroundView.material = .selection
-            backgroundView.blendingMode = .withinWindow
-            backgroundView.state = .active
-            backgroundView.isEmphasized = true
-            backgroundView.wantsLayer = true
-            backgroundView.layer?.cornerRadius = 8
-            backgroundView.layer?.cornerCurve = .continuous
-            backgroundView.layer?.masksToBounds = true
+            let backgroundView = NextMenusRendering.makeSelectionBackground(
+                frame: CGRect(x: 6, y: 0, width: windowWidth - 12, height: rowHeight)
+            )
             backgroundView.identifier = NSUserInterfaceItemIdentifier("BackgroundView")
             backgroundView.isHidden = true
             cell?.addSubview(backgroundView)

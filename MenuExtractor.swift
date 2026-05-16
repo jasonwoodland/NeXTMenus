@@ -292,14 +292,6 @@ class MenuExtractor {
             ))
         }
 
-        // Debug: Print all items before processing
-        print("=== Extracted \(allItems.count) menu items ===")
-        for (index, item) in allItems.enumerated() {
-            if !item.isSeparator {
-                print("\(index): \(item.title)")
-            }
-        }
-
         // Second pass: identify alternates
         // Look for consecutive items that appear to be alternates of each other
         for i in 0..<allItems.count {
@@ -321,14 +313,11 @@ class MenuExtractor {
             let areAlternates = checkIfAlternates(title1: title1, title2: title2)
 
             if areAlternates {
-                print("Found alternates: '\(item1.title)' <-> '\(item2.title)'")
-
                 // Mark the appropriate one as alternate
                 // Usually the longer/more specific one is the alternate
                 if title2.contains("all") || title2.contains("alternative") ||
                    title2.count > title1.count {
                     // Second item is the alternate (shown with modifiers)
-                    print("  -> '\(item2.title)' marked as alternate (requires Option)")
                     allItems[i + 1] = MenuItem(
                         title: item2.title,
                         isEnabled: item2.isEnabled,
@@ -345,7 +334,6 @@ class MenuExtractor {
                     )
                 } else if title1.contains("all") || title1.contains("alternative") {
                     // First item is the alternate
-                    print("  -> '\(item1.title)' marked as alternate (requires Option)")
                     allItems[i] = MenuItem(
                         title: item1.title,
                         isEnabled: item1.isEnabled,

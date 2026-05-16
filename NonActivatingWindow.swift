@@ -32,35 +32,37 @@ class NonActivatingWindow: NSPanel {
         // Disable the system fade-in/out animation when the window is shown
         self.animationBehavior = .none
 
-        // Setup translucent glass appearance
-        setupGlassEffect()
+        setupBackground()
     }
 
-    private func setupGlassEffect() {
-        // Create visual effect view for liquid glass appearance
-        let visualEffectView = NSVisualEffectView(frame: contentView?.bounds ?? .zero)
-        visualEffectView.autoresizingMask = [.width, .height]
+    private func setupBackground() {
+        if NextMenusRendering.useGlassEffects {
+            let visualEffectView = NSVisualEffectView(frame: contentView?.bounds ?? .zero)
+            visualEffectView.autoresizingMask = [.width, .height]
+            visualEffectView.material = .menu
+            visualEffectView.blendingMode = .behindWindow
+            visualEffectView.state = .active
+            visualEffectView.alphaValue = 1
+            visualEffectView.wantsLayer = true
+            visualEffectView.layer?.cornerRadius = 10
+            visualEffectView.layer?.cornerCurve = .continuous
+            visualEffectView.layer?.masksToBounds = true
+            self.contentView = visualEffectView
+            self.isOpaque = false
+            self.backgroundColor = .clear
+            return
+        }
 
-        // Use hudWindow for modern liquid glass translucent effect
-        visualEffectView.material = .menu
-        visualEffectView.blendingMode = .behindWindow
-        visualEffectView.state = .active
+        let backgroundView = NSView(frame: contentView?.bounds ?? .zero)
+        backgroundView.autoresizingMask = [.width, .height]
+        backgroundView.wantsLayer = true
+        backgroundView.layer?.backgroundColor = NextMenusRendering.windowBackgroundColor.cgColor
+        backgroundView.layer?.cornerRadius = 10
+        backgroundView.layer?.cornerCurve = .continuous
+        backgroundView.layer?.masksToBounds = true
+        self.contentView = backgroundView
 
-        // Make the visual effect view transparent
-        visualEffectView.alphaValue = 1
-
-        // Round the glass slightly tighter than the system window corner.
-        // Tune `cornerRadius` to taste.
-        visualEffectView.wantsLayer = true
-        visualEffectView.layer?.cornerRadius = 10
-        visualEffectView.layer?.cornerCurve = .continuous
-        visualEffectView.layer?.masksToBounds = true
-
-        // Set the visual effect view as the content view
-        self.contentView = visualEffectView
-
-        // Make window background transparent
-        self.isOpaque = false
-        self.backgroundColor = .clear
+        self.isOpaque = true
+        self.backgroundColor = NextMenusRendering.windowBackgroundColor
     }
 }

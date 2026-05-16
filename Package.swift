@@ -25,6 +25,7 @@ let package = Package(
                 "AppDelegate.swift",
                 "ApplicationObserver.swift",
                 "MenuExtractor.swift",
+                "MenuItemVisibility.swift",
                 "MenuWindowController.swift",
                 "SubmenuWindowController.swift",
                 "NonActivatingWindow.swift",

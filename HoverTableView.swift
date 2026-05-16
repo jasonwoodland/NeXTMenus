@@ -33,13 +33,10 @@ class HoverTableView: NSTableView {
     override func mouseMoved(with event: NSEvent) {
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
-        print("HoverTableView mouseMoved at row \(row)")
         onMouseMoved?(row)
     }
 
     override func mouseDown(with event: NSEvent) {
-        print("HoverTableView mouseDown")
-
         // Note: deliberately not making the window key/front on click, so a
         // click in a menu doesn't focus or raise it.
 
@@ -59,15 +56,12 @@ class HoverTableView: NSTableView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        print("HoverTableView mouseUp")
-
         // Check if this was a long press (>500ms) - but only if the mouse
         // never moved to a different row. A slow click-drag also exceeds
         // 500ms and must not be treated as a long press.
         if let timestamp = mouseDownTimestamp {
             let duration = Date().timeIntervalSince(timestamp)
             if duration > 0.5 && mouseDownRow >= 0 && !hasDraggedToNewRow {
-                print("Long press detected on row \(mouseDownRow), duration: \(duration)")
                 onMouseLongPressReleased?(mouseDownRow)
                 mouseDownRow = -1
                 mouseDownTimestamp = nil
@@ -79,7 +73,6 @@ class HoverTableView: NSTableView {
         // Not a long press - notify parent at current mouse location
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
-        print("HoverTableView mouseUp at row \(row), hasDraggedToNewRow: \(hasDraggedToNewRow)")
         onMouseUp?(row, hasDraggedToNewRow)
 
         mouseDownRow = -1
@@ -88,8 +81,6 @@ class HoverTableView: NSTableView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        print("HoverTableView mouseDragged")
-
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
 
