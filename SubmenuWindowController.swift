@@ -630,16 +630,25 @@ class SubmenuWindowController: NSWindowController {
             hoveredRow = row
             updateAllRowHighlights()
         }
-        if rowChanged {
-            updateOpenSubmenu(forHoveredRow: row)
-        }
+        // Always (not only on row change), so a submenu re-opens if the
+        // click-drag's initial mouse-down toggled it closed.
+        updateOpenSubmenu(forHoveredRow: row)
     }
 
     // Opens the hovered row's submenu if it has one, otherwise collapses any
-    // open submenu. A row of -1 means the pointer is over the child window,
-    // so the submenu is left open.
+    // open submenu. A row of -1 means the pointer is off this menu's rows -
+    // it's left open only if the pointer is over the child window itself.
     private func updateOpenSubmenu(forHoveredRow row: Int) {
-        guard row >= 0 else { return }
+        if row < 0 {
+            // Dragging off the menu items: close the submenu unless the
+            // pointer is over the child window.
+            if isDragging, childSubmenuRow != nil,
+               !(childSubmenuController?.window?.frame.contains(NSEvent.mouseLocation) ?? false) {
+                closeSubmenu()
+                updateAllRowHighlights()
+            }
+            return
+        }
         if childSubmenuRow == row { return }
 
         if tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
@@ -1194,8 +1203,13 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
         let menuItem = visibleMenuItems[row]
 
-        // Clicking the item whose submenu is already open - leave it open
+        // Clicking the item whose submenu is already open: a torn-off menu
+        // toggles it closed; an attached submenu leaves it open.
         if childSubmenuRow == row {
+            if isTornOff {
+                closeSubmenu()
+                updateAllRowHighlights()
+            }
             return
         }
 
