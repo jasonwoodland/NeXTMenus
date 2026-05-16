@@ -10,14 +10,79 @@ class MenuWindowController: NSWindowController {
     private let rowHeight: CGFloat = 24
     private let titleBarHeight: CGFloat = 28
     private let windowWidth: CGFloat = 180
+    // Small breathing room below the last row so it isn't flush with the edge
+    private static let bottomMargin: CGFloat = 8
 
     // Track child submenu window
     private var childSubmenuController: SubmenuWindowController?
     private var childSubmenuRow: Int?
 
+    // Submenu windows the user has torn off; retained so they stay on screen.
+    private var detachedControllers: [SubmenuWindowController] = []
+
+    // True while the pointer is in a child submenu rather than this menu.
+    private var childHasMouse = false
+
     // Track window movement completion
     private var moveTimer: Timer?
 
+    // State management for menu interactions
+    private var hoveredRow: Int? // Currently highlighted row (visual only)
+    private var isDragging: Bool = false // True while a click-drag is in progress
+
+    // Track local event monitor for cross-window drag
+    private var localDragMonitor: Any?
+
+    // Modifier key tracking
+    private var currentModifierFlags: NSEvent.ModifierFlags = []
+    private var modifierMonitor: Any?
+
+    // Computed property to get visible menu items based on current modifiers
+    private var visibleMenuItems: [MenuItem] {
+        let hasOption = currentModifierFlags.contains(.option)
+        let hasShift = currentModifierFlags.contains(.shift)
+        let hasControl = currentModifierFlags.contains(.control)
+
+        print("=== Filtering menu items (Option:\(hasOption), Shift:\(hasShift), Control:\(hasControl)) ===")
+
+        // Filter out alternate items unless their required modifiers are pressed
+        let filtered = menuItems.filter { item in
+            // Always show separators
+            if item.isSeparator {
+                return true
+            }
+
+            // If it's marked as alternate
+            if item.isAlternate {
+                let show = hasOption || hasShift || hasControl
+                if !show {
+                    print("Hiding alternate: '\(item.title)'")
+                }
+                return show
+            }
+
+            // Regular items - hide when modifiers are pressed if there's an alternate
+            // Check if next item is an alternate of this one
+            if let index = menuItems.firstIndex(where: { $0.element === item.element }),
+               index + 1 < menuItems.count {
+                let nextItem = menuItems[index + 1]
+                if nextItem.isAlternate && !nextItem.isSeparator {
+                    // This has an alternate, hide when modifiers pressed
+                    let show = !hasOption && !hasShift && !hasControl
+                    if !show {
+                        print("Hiding regular (has alternate): '\(item.title)'")
+                    }
+                    return show
+                }
+            }
+
+            // Regular items without alternates - always show
+            return true
+        }
+
+        print("Filtered to \(filtered.count) items from \(menuItems.count)")
+        return filtered
+    }
 
     init(appName: String, appMenuItem: MenuItem?, menuItems: [MenuItem], targetApp: NSRunningApplication) {
         self.appName = appName
@@ -29,13 +94,12 @@ class MenuWindowController: NSWindowController {
         // Add 1 for the "Info" row (app menu)
         let numberOfRows = menuItems.count + 1
         let contentHeight = CGFloat(numberOfRows) * rowHeight
-        let extraPadding: CGFloat = 16 // Additional padding for better spacing
-        let windowHeight = contentHeight + titleBarHeight + extraPadding
+        let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin
 
         // Create window with initial frame (will be positioned when shown)
         let window = NonActivatingWindow(
             contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -46,6 +110,10 @@ class MenuWindowController: NSWindowController {
         window.title = appName
         setupWindow()
         setupTableView()
+
+        // Size the window precisely to the table's content geometry
+        tableView.reloadData()
+        resizeWindowToFitContent()
     }
 
     required init?(coder: NSCoder) {
@@ -58,8 +126,8 @@ class MenuWindowController: NSWindowController {
         menuWindow.standardWindowButton(.miniaturizeButton)?.isHidden = true
         menuWindow.standardWindowButton(.zoomButton)?.isHidden = true
 
-        // Make window float on top
-        menuWindow.level = .floating
+        // Float above all application windows, like a real menu
+        menuWindow.level = .popUpMenu
         menuWindow.isMovableByWindowBackground = true
 
         // Enable translucent glass appearance with visible title
@@ -85,6 +153,79 @@ class MenuWindowController: NSWindowController {
             name: NSWindow.didMoveNotification,
             object: menuWindow
         )
+
+        // Set up local event monitor for mouse drags to handle cross-window hovering
+        setupDragMonitor()
+
+        // Set up modifier key monitoring
+        setupModifierMonitor()
+    }
+
+    private func setupDragMonitor() {
+        localDragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self = self else { return event }
+
+            let mouseLocation = NSEvent.mouseLocation
+
+            // Check if we have a child window open
+            guard let childController = self.childSubmenuController,
+                  let childWindow = childController.window,
+                  childWindow.frame.contains(mouseLocation) else {
+                return event
+            }
+
+            let childRow = childController.getTableView().rowAtScreenPoint(mouseLocation)
+
+            if event.type == .leftMouseDragged {
+                // Forward drag to child (no makeKey - avoids a focus flicker)
+                childController.handleDragFromParent(at: childRow)
+                // Clear parent hover
+                self.hoveredRow = nil
+                self.updateAllRowHighlights()
+            } else if event.type == .leftMouseUp {
+                // Forward mouse up to child
+                childController.handleMouseUpFromParent(at: childRow)
+            }
+
+            return event
+        }
+    }
+
+    private func setupModifierMonitor() {
+        // Global monitor: the windows are non-activating panels, so this app is
+        // never the active app — flagsChanged events go to the active app, and
+        // a local monitor would never see them.
+        modifierMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            guard let self = self else { return }
+
+            // Track if modifiers have changed
+            let newModifierFlags = event.modifierFlags
+            if self.currentModifierFlags != newModifierFlags {
+                self.currentModifierFlags = newModifierFlags
+
+                // Don't re-extract top-level menu items since they typically don't change
+                // The submenu items will be re-extracted when opened
+
+                // Reload the table to show/hide alternate menu items
+                DispatchQueue.main.async {
+                    self.tableView.reloadData()
+                    self.resizeWindowToFitContent()
+
+                    // Also notify child submenu to update if it exists
+                    self.childSubmenuController?.updateModifierFlags(newModifierFlags)
+                }
+            }
+        }
+    }
+
+    deinit {
+        if let monitor = localDragMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = modifierMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        NotificationCenter.default.removeObserver(self)
     }
 
     @objc private func windowDidMove(_ notification: Notification) {
@@ -112,7 +253,9 @@ class MenuWindowController: NSWindowController {
         // Create scroll view with padding for title bar
         guard let contentView = menuWindow.contentView else { return }
 
-        // Calculate frame to start below the title bar
+        // Scroll view fills the area below the title bar, down to the window
+        // bottom. The window is `bottomMargin` taller than the rows, so that
+        // margin shows as empty space below the last (top-anchored) row.
         let scrollViewFrame = NSRect(
             x: 0,
             y: 0,
@@ -132,12 +275,17 @@ class MenuWindowController: NSWindowController {
 
         // Create table view
         tableView = HoverTableView(frame: scrollView.bounds)
-        tableView.autoresizingMask = [.width, .height]
+        // Width-only: as a scroll-view documentView the table's height must
+        // track its rows, not get stretched to the clip (which over-scrolls).
+        tableView.autoresizingMask = [.width]
         tableView.headerView = nil
         tableView.backgroundColor = .clear
         tableView.gridStyleMask = []
         tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.rowHeight = rowHeight
+        // .plain: rows are flush to the window edges. The rounded highlight is
+        // drawn by a per-cell view (see viewFor / updateRowHighlight).
+        tableView.style = .plain
 
         // Add a single column
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("MenuItemColumn"))
@@ -148,14 +296,25 @@ class MenuWindowController: NSWindowController {
         tableView.delegate = self
         tableView.dataSource = self
 
-        // Set up hover callback for drag-over behavior
-        tableView.onMouseDraggedOverRow = { [weak self] row in
-            self?.handleMouseDraggedOverRow(row)
+        // Set up mouse callbacks
+        tableView.onMouseMoved = { [weak self] row in
+            self?.handleMouseMoved(row)
         }
 
-        // Set up click callback
-        tableView.onMouseClickedRow = { [weak self] row in
-            self?.handleMouseClickedRow(row)
+        tableView.onMouseDown = { [weak self] row in
+            self?.handleMouseDown(row)
+        }
+
+        tableView.onMouseDraggedOverRow = { [weak self] row in
+            self?.handleMouseDragged(row)
+        }
+
+        tableView.onMouseUp = { [weak self] row, wasDragged in
+            self?.handleMouseUp(row, wasDragged: wasDragged)
+        }
+
+        tableView.onMouseLongPressReleased = { [weak self] row in
+            self?.handleMouseLongPressReleased(row)
         }
 
         // Add table view to scroll view
@@ -165,13 +324,44 @@ class MenuWindowController: NSWindowController {
         contentView.addSubview(scrollView)
     }
 
-    private func handleMouseDraggedOverRow(_ row: Int) {
-        // Check if row is selectable (not disabled or separator)
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
-            return
-        }
+    // MARK: - Mouse Event Handlers
 
-        // Get the menu item at this row
+    // Handle mouse hover (no button pressed) - visual highlight only
+    private func handleMouseMoved(_ row: Int) {
+        // Pointer is back in the main menu - re-emphasize its open-submenu row
+        if childHasMouse {
+            childHasMouse = false
+            updateAllRowHighlights()
+        }
+        let rowChanged = hoveredRow != row
+        if rowChanged || isDragging {
+            isDragging = false
+            hoveredRow = row
+            updateAllRowHighlights()
+        }
+        // Once a submenu is open, hovering a sibling switches to its submenu
+        if rowChanged, childSubmenuRow != nil {
+            updateOpenSubmenu(forHoveredRow: row)
+        }
+    }
+
+    // Re-orders the open submenu chain above this window; the deepest one
+    // becomes key. Called after a click, which would otherwise raise this
+    // window on top of its own submenu.
+    func raiseSubmenuChain() {
+        childSubmenuController?.bringChainToFront()
+    }
+
+    // Handle mouse down - open the submenu immediately
+    private func handleMouseDown(_ row: Int) {
+        // A click raises this window above its open submenu; re-assert the
+        // chain on top afterwards so the submenu stays focused/visible.
+        defer {
+            DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
+        }
+        guard row >= 0 else { return }
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+
         let menuItem: MenuItem?
         if row == 0 {
             menuItem = appMenuItem
@@ -179,13 +369,94 @@ class MenuWindowController: NSWindowController {
             menuItem = menuItems[row - 1]
         }
 
-        // If it's different from current open submenu and not a separator, show it
-        if let menuItem = menuItem, row != childSubmenuRow, !menuItem.isSeparator {
-            showSubmenu(for: menuItem, at: row)
+        guard let menuItem = menuItem, !menuItem.isSeparator else { return }
+        showSubmenu(for: menuItem, at: row)
+    }
+
+    // Handle mouse drag (button held) - open menus while dragging
+    private func handleMouseDragged(_ row: Int) {
+        // Only clear when the pointer is over a row of this menu; during a
+        // drag this still fires (mouse capture) when the pointer is in a
+        // child submenu, where row is -1.
+        if row >= 0, childHasMouse {
+            childHasMouse = false
+            updateAllRowHighlights()
+        }
+        let rowChanged = hoveredRow != row
+        if rowChanged || !isDragging {
+            isDragging = true
+            hoveredRow = row
+            updateAllRowHighlights()
+        }
+        if rowChanged {
+            updateOpenSubmenu(forHoveredRow: row)
+        }
+    }
+
+    // Switches the open submenu to the hovered row. A row of -1 means the
+    // pointer is over the child window, so the submenu is left open.
+    private func updateOpenSubmenu(forHoveredRow row: Int) {
+        guard row >= 0 else { return }
+        if childSubmenuRow == row { return }
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+        let menuItem: MenuItem?
+        if row == 0 {
+            menuItem = appMenuItem
+        } else {
+            menuItem = visibleMenuItems[row - 1]
+        }
+        guard let menuItem = menuItem, !menuItem.isSeparator else { return }
+        showSubmenu(for: menuItem, at: row)
+    }
+
+    // Expose tableView for cross-window detection
+    func getTableView() -> HoverTableView {
+        return tableView
+    }
+
+    // Helper to update all row highlights
+    private func updateAllRowHighlights() {
+        for i in 0..<tableView.numberOfRows {
+            updateRowHighlight(forRow: i)
         }
     }
 
     func showWindow() {
+        menuWindow.orderFrontRegardless()
+    }
+
+    // Replace the menu items with a fully pre-extracted tree, once the
+    // background extraction has finished.
+    func applyFullMenu(appMenuItem: MenuItem?, menuItems: [MenuItem]) {
+        self.appMenuItem = appMenuItem
+        self.menuItems = menuItems
+        tableView.reloadData()
+        resizeWindowToFitContent()
+    }
+
+    // Total height of all rows, read from the table's actual layout geometry
+    // rather than recomputed from row counts.
+    private func tableContentHeight() -> CGFloat {
+        let count = tableView.numberOfRows
+        guard count > 0 else { return 0 }
+        return tableView.rect(ofRow: count - 1).maxY
+    }
+
+    // Resize the window so it exactly fits the current table content.
+    private func resizeWindowToFitContent() {
+        let contentH = tableContentHeight()
+        let height = contentH + titleBarHeight + Self.bottomMargin
+        var frame = menuWindow.frame
+        frame.origin.y += frame.size.height - height  // keep the top edge fixed
+        frame.size.height = height
+        menuWindow.setFrame(frame, display: true)
+        // Pin the table to its content height. As a scroll-view documentView
+        // it doesn't auto-shrink when the clip does, so a stale taller frame
+        // would let the scroll view scroll past the rows.
+        tableView.frame.size.height = contentH
+    }
+
+    func resetPosition() {
         // Get the screen containing the mouse pointer (current screen)
         let mouseLocation = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
@@ -194,24 +465,65 @@ class MenuWindowController: NSWindowController {
             return
         }
 
-        // Position at top-left (0, 0) of the screen, accounting for menu bar
-        let menuBarHeight = screen.frame.height - screen.visibleFrame.height - screen.visibleFrame.origin.y
+        // Position 8pt in from the top-left corner of the screen
         let windowHeight = menuWindow.frame.height
+        let inset: CGFloat = 8
 
         menuWindow.setFrameOrigin(NSPoint(
-            x: screen.frame.origin.x,
-            y: screen.frame.maxY - windowHeight - menuBarHeight
+            x: screen.frame.origin.x + inset,
+            y: screen.frame.maxY - windowHeight - inset
         ))
 
-        menuWindow.orderFrontRegardless()
     }
 
     func hideWindow() {
         // Hide child submenu first
         childSubmenuController?.hideWindow()
         childSubmenuController = nil
+        childSubmenuRow = nil
+        hoveredRow = nil
 
         menuWindow.orderOut(nil)
+    }
+
+    // Collapses the whole submenu chain back to this main menu window.
+    func collapseSubmenus() {
+        childSubmenuController?.hideWindow()
+        childSubmenuController = nil
+        childSubmenuRow = nil
+        updateAllRowHighlights()
+    }
+
+    // Creates a child submenu controller and wires up its callbacks.
+    private func makeChildController(title: String, menuItems: [MenuItem],
+                                     parentMenuItem: MenuItem?) -> SubmenuWindowController {
+        let child = SubmenuWindowController(title: title, menuItems: menuItems,
+                                            targetApp: targetApp, parentMenuItem: parentMenuItem)
+        child.onWillHide = { [weak self] in
+            guard let self = self else { return }
+            self.childSubmenuRow = nil
+            self.updateAllRowHighlights()
+        }
+        child.onTornOff = { [weak self, weak child] in
+            guard let self = self, let child = child,
+                  self.childSubmenuController === child else { return }
+            self.detachedControllers.append(child)
+            self.childSubmenuController = nil
+            self.childSubmenuRow = nil
+            self.updateAllRowHighlights()
+        }
+        // An action performed deep in the chain collapses back to this window.
+        child.dismissChain = { [weak self] in
+            self?.collapseSubmenus()
+        }
+        child.onPointerEntered = { [weak self] in
+            guard let self = self else { return }
+            if !self.childHasMouse {
+                self.childHasMouse = true
+                self.updateAllRowHighlights()
+            }
+        }
+        return child
     }
 }
 
@@ -219,7 +531,7 @@ class MenuWindowController: NSWindowController {
 extension MenuWindowController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
         // Add 1 for the "Info" row
-        return menuItems.count + 1
+        return visibleMenuItems.count + 1
     }
 }
 
@@ -231,14 +543,28 @@ extension MenuWindowController: NSTableViewDelegate {
         var cell = tableView.makeView(withIdentifier: cellIdentifier, owner: self) as? NSTableCellView
 
         if cell == nil {
-            cell = NSTableCellView()
+            cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: rowHeight))
             cell?.identifier = cellIdentifier
+            cell?.wantsLayer = true
 
-            // Calculate Y offset to center text vertically
-            let textHeight: CGFloat = 17
-            let yOffset = (rowHeight - textHeight) / 2
+            // Rounded selection highlight - a material fill, shown/hidden by
+            // updateRowHighlight(). Full row height (no gap between items).
+            let backgroundView = NSVisualEffectView(frame: CGRect(x: 6, y: 0, width: windowWidth - 12, height: rowHeight))
+            backgroundView.material = .selection
+            backgroundView.blendingMode = .withinWindow
+            backgroundView.state = .active
+            backgroundView.isEmphasized = true
+            backgroundView.wantsLayer = true
+            backgroundView.layer?.cornerRadius = 8
+            backgroundView.layer?.cornerCurve = .continuous
+            backgroundView.layer?.masksToBounds = true
+            backgroundView.identifier = NSUserInterfaceItemIdentifier("BackgroundView")
+            backgroundView.autoresizingMask = [.width, .height]
+            backgroundView.isHidden = true
+            cell?.addSubview(backgroundView)
 
-            let textField = NSTextField(frame: NSRect(x: 8, y: yOffset, width: windowWidth - 16, height: textHeight))
+            // Full-height label; CenteredLabel keeps the text vertically centered
+            let textField = CenteredLabel(frame: NSRect(x: 18, y: 0, width: windowWidth - 56, height: rowHeight))
             textField.isBordered = false
             textField.backgroundColor = .clear
             textField.isEditable = false
@@ -251,7 +577,20 @@ extension MenuWindowController: NSTableViewDelegate {
 
             cell?.addSubview(textField)
             cell?.textField = textField
+
+            // Trailing disclosure chevron - main menu items are all submenus
+            let chevronView = NSImageView(frame: NSRect(x: windowWidth - 30, y: 0, width: 14, height: rowHeight))
+            chevronView.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .bold))
+            chevronView.imageScaling = .scaleNone
+            chevronView.imageAlignment = .alignCenter
+            chevronView.identifier = NSUserInterfaceItemIdentifier("ChevronView")
+            cell?.addSubview(chevronView)
         }
+
+        let chevronView = cell?.subviews.first {
+            $0.identifier == NSUserInterfaceItemIdentifier("ChevronView")
+        } as? NSImageView
 
         // First row is "Info" (the app menu)
         if row == 0 {
@@ -259,17 +598,20 @@ extension MenuWindowController: NSTableViewDelegate {
             cell?.textField?.font = NSFont.systemFont(ofSize: 13)
             cell?.textField?.textColor = appMenuItem?.isEnabled ?? true ? .labelColor : .disabledControlTextColor
             cell?.textField?.isHidden = false
+            chevronView?.isHidden = false
+            chevronView?.contentTintColor = appMenuItem?.isEnabled ?? true ? .labelColor : .disabledControlTextColor
         } else {
-            let menuItem = menuItems[row - 1]
+            let menuItem = visibleMenuItems[row - 1]
 
             // Handle separators
             if menuItem.isSeparator {
                 cell?.textField?.isHidden = true
+                chevronView?.isHidden = true
 
                 // Add separator line if not already added
                 let separatorId = NSUserInterfaceItemIdentifier("Separator")
                 if cell?.subviews.first(where: { $0.identifier == separatorId }) == nil {
-                    let separator = NSBox(frame: NSRect(x: 8, y: rowHeight / 2 - 0.5, width: windowWidth - 16, height: 1))
+                    let separator = NSBox(frame: NSRect(x: 0, y: rowHeight / 2 - 0.5, width: windowWidth, height: 1))
                     separator.boxType = .separator
                     separator.identifier = separatorId
                     separator.autoresizingMask = [.width]
@@ -280,6 +622,8 @@ extension MenuWindowController: NSTableViewDelegate {
                 cell?.textField?.stringValue = menuItem.title
                 cell?.textField?.font = NSFont.systemFont(ofSize: 13)
                 cell?.textField?.textColor = menuItem.isEnabled ? .labelColor : .disabledControlTextColor
+                chevronView?.isHidden = false
+                chevronView?.contentTintColor = menuItem.isEnabled ? .labelColor : .disabledControlTextColor
 
                 // Remove separator if it exists
                 let separatorId = NSUserInterfaceItemIdentifier("Separator")
@@ -301,7 +645,7 @@ extension MenuWindowController: NSTableViewDelegate {
         if row == 0 {
             return appMenuItem?.isEnabled ?? true
         } else {
-            let menuItem = menuItems[row - 1]
+            let menuItem = visibleMenuItems[row - 1]
             return menuItem.isEnabled && !menuItem.isSeparator
         }
     }
@@ -312,27 +656,56 @@ extension MenuWindowController: NSTableViewDelegate {
     }
 
     private func updateRowHighlight(forRow row: Int) {
-        guard let rowView = tableView.rowView(atRow: row, makeIfNecessary: false) else { return }
         guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
 
-        let isHighlighted = (childSubmenuRow == row)
+        // Only enabled, non-separator rows can be highlighted
+        let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
 
-        if isHighlighted {
-            rowView.isSelected = true
-            cellView.backgroundStyle = .emphasized
-        } else {
-            rowView.isSelected = false
-            cellView.backgroundStyle = .normal
+        // Highlight if this row has an open submenu, or if it's being hovered
+        // while a sibling already has an open submenu or a drag is in progress
+        let isHighlighted = hoverable
+            && ((childSubmenuRow == row)
+                || (hoveredRow == row && (childSubmenuRow != nil || isDragging)))
+
+        let highlightView = cellView.subviews.first {
+            $0.identifier == NSUserInterfaceItemIdentifier("BackgroundView")
         }
+        highlightView?.isHidden = !isHighlighted
+        // The open-submenu row de-emphasizes (different material, not the blue
+        // selection) while the pointer is down in the child submenu.
+        if let effect = highlightView as? NSVisualEffectView {
+            let inChild = (childSubmenuRow == row) && childHasMouse
+            effect.isEmphasized = !inChild
+        }
+        cellView.backgroundStyle = isHighlighted ? .emphasized : .normal
     }
 
-    private func handleMouseClickedRow(_ row: Int) {
-        // Check if row is selectable (not disabled or separator)
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
-            return
+    // Handle mouse up - submenu opening is handled on mouse down
+    private func handleMouseUp(_ row: Int, wasDragged: Bool) {
+        isDragging = false
+        // A click-drag released on a menu item closes its open submenu
+        if wasDragged, row >= 0, childSubmenuRow == row {
+            collapseSubmenus()
         }
+        // A click can also raise this window on mouse-up; keep the chain on top
+        DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
+    }
 
-        // Get the menu item at this row
+    // Handle long press release - close menus
+    private func handleMouseLongPressReleased(_ row: Int) {
+        childSubmenuController?.hideWindow()
+        childSubmenuController = nil
+        childSubmenuRow = nil
+        hoveredRow = nil
+        isDragging = false
+        updateAllRowHighlights()
+    }
+
+    // Execute action at row (called from child window)
+    func executeActionAtRow(_ row: Int) {
+        guard row >= 0 else { return }
+        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+
         let menuItem: MenuItem?
         if row == 0 {
             menuItem = appMenuItem
@@ -340,10 +713,12 @@ extension MenuWindowController: NSTableViewDelegate {
             menuItem = menuItems[row - 1]
         }
 
-        guard let menuItem = menuItem else { return }
+        guard let menuItem = menuItem, let element = menuItem.element else { return }
 
-        // Show submenu at the right edge of the window
-        showSubmenu(for: menuItem, at: row)
+        // Execute action
+        targetApp?.activate(options: [])
+        usleep(50000)
+        AXUIElementPerformAction(element, kAXPressAction as CFString)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -371,59 +746,40 @@ extension MenuWindowController: NSTableViewDelegate {
     private func showSubmenu(for menuItem: MenuItem, at row: Int) {
         guard let element = menuItem.element else { return }
 
-        // Check if clicking on the same item that's already open - toggle it closed
-        if let existingChild = childSubmenuController, childSubmenuRow == row {
-            childSubmenuController?.hideWindow()
-            childSubmenuController = nil
-            childSubmenuRow = nil
-
-            // Update all row highlights
-            for i in 0..<tableView.numberOfRows {
-                updateRowHighlight(forRow: i)
-            }
+        // Clicking the item whose submenu is already open - close it
+        if childSubmenuRow == row {
+            collapseSubmenus()
             return
         }
 
-        // Extract submenu items on-demand
-        let submenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
+        // Use the pre-extracted submenu tree (falls back to on-demand)
+        let submenuItems = MenuExtractor.submenuItems(for: menuItem)
 
-        // If this item has submenu items, show child submenu window
+        // Row 0 is the app menu, shown as "Info" - its submenu uses that title
+        let displayTitle = (row == 0) ? "Info" : menuItem.title
+
         if !submenuItems.isEmpty {
-            // Close any existing child submenu
-            childSubmenuController?.hideWindow()
-
-            // Create and show new child submenu
-            childSubmenuController = SubmenuWindowController(
-                title: menuItem.title,
-                menuItems: submenuItems,
-                targetApp: targetApp
-            )
-            childSubmenuController?.showWindow(rightOf: menuWindow, alignedToRow: row)
-            childSubmenuRow = row
-
-            // Update all row highlights
-            for i in 0..<tableView.numberOfRows {
-                updateRowHighlight(forRow: i)
+            // Reuse the existing child window if one is open, otherwise create
+            // one - reusing avoids slow per-switch window/monitor setup.
+            if let child = childSubmenuController {
+                child.reconfigure(title: displayTitle, menuItems: submenuItems,
+                                  parentMenuItem: menuItem)
+                child.showWindow(rightOf: menuWindow, alignedToRow: row)
+            } else {
+                let child = makeChildController(title: displayTitle,
+                                                menuItems: submenuItems,
+                                                parentMenuItem: menuItem)
+                childSubmenuController = child
+                child.showWindow(rightOf: menuWindow, alignedToRow: row)
             }
+            childSubmenuRow = row
+            updateAllRowHighlights()
         } else {
             // No submenu - this is an action item, execute it
-            // Activate the target application first so the action executes in the right context
             targetApp?.activate(options: [])
-
-            // Small delay to ensure activation completes
-            usleep(50000) // 50ms
-
+            usleep(50000) // 50ms - let activation complete
             AXUIElementPerformAction(element, kAXPressAction as CFString)
-
-            // Close any open child submenu
-            childSubmenuController?.hideWindow()
-            childSubmenuController = nil
-            childSubmenuRow = nil
-
-            // Update all row highlights
-            for i in 0..<tableView.numberOfRows {
-                updateRowHighlight(forRow: i)
-            }
+            collapseSubmenus()
         }
     }
 }

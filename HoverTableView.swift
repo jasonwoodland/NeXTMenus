@@ -1,24 +1,59 @@
 import Cocoa
 
 class HoverTableView: NSTableView {
-    var onMouseDraggedOverRow: ((Int) -> Void)?
-    var onMouseClickedRow: ((Int) -> Void)?
-    private var isMousePressed = false
-    private var lastHoveredRow: Int = -1
+    var onMouseMoved: ((Int) -> Void)?  // Hover with no button pressed
+    var onMouseDraggedOverRow: ((Int) -> Void)?  // Drag with button pressed
+    var onMouseDown: ((Int) -> Void)?
+    var onMouseUp: ((Int, Bool) -> Void)?  // (row, wasDragged)
+    var onMouseLongPressReleased: ((Int) -> Void)?
+
     private var mouseDownRow: Int = -1
+    private var mouseDownTimestamp: Date?
+    private var hasDraggedToNewRow = false
+    private var trackingArea: NSTrackingArea?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        return true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+
+        // .activeAlways so hover events still fire when this window is not key
+        // (e.g. after a child submenu window has taken key status)
+        let options: NSTrackingArea.Options = [.mouseEnteredAndExited, .mouseMoved, .activeAlways]
+        trackingArea = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(trackingArea!)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let locationInView = self.convert(event.locationInWindow, from: nil)
+        let row = self.row(at: locationInView)
+        print("HoverTableView mouseMoved at row \(row)")
+        onMouseMoved?(row)
+    }
 
     override func mouseDown(with event: NSEvent) {
         print("HoverTableView mouseDown")
 
-        // Make the window key to ensure it receives events
-        self.window?.makeKey()
+        // Note: deliberately not making the window key/front on click, so a
+        // click in a menu doesn't focus or raise it.
 
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
 
-        isMousePressed = true
-        lastHoveredRow = row
         mouseDownRow = row
+        mouseDownTimestamp = Date()
+        hasDraggedToNewRow = false
+
+        // Notify parent of mouse down
+        if row >= 0 {
+            onMouseDown?(row)
+        }
 
         // Don't call super - we'll handle everything ourselves
     }
@@ -26,32 +61,59 @@ class HoverTableView: NSTableView {
     override func mouseUp(with event: NSEvent) {
         print("HoverTableView mouseUp")
 
-        let locationInView = self.convert(event.locationInWindow, from: nil)
-        let row = self.row(at: locationInView)
-
-        // If mouse up on same row as mouse down, it's a click
-        if row == mouseDownRow && row >= 0 {
-            print("Clicked on row \(row)")
-            onMouseClickedRow?(row)
+        // Check if this was a long press (>500ms) - but only if the mouse
+        // never moved to a different row. A slow click-drag also exceeds
+        // 500ms and must not be treated as a long press.
+        if let timestamp = mouseDownTimestamp {
+            let duration = Date().timeIntervalSince(timestamp)
+            if duration > 0.5 && mouseDownRow >= 0 && !hasDraggedToNewRow {
+                print("Long press detected on row \(mouseDownRow), duration: \(duration)")
+                onMouseLongPressReleased?(mouseDownRow)
+                mouseDownRow = -1
+                mouseDownTimestamp = nil
+                hasDraggedToNewRow = false
+                return
+            }
         }
 
-        isMousePressed = false
-        lastHoveredRow = -1
+        // Not a long press - notify parent at current mouse location
+        let locationInView = self.convert(event.locationInWindow, from: nil)
+        let row = self.row(at: locationInView)
+        print("HoverTableView mouseUp at row \(row), hasDraggedToNewRow: \(hasDraggedToNewRow)")
+        onMouseUp?(row, hasDraggedToNewRow)
+
         mouseDownRow = -1
+        mouseDownTimestamp = nil
+        hasDraggedToNewRow = false
     }
 
     override func mouseDragged(with event: NSEvent) {
-        print("HoverTableView mouseDragged, isMousePressed: \(isMousePressed)")
+        print("HoverTableView mouseDragged")
 
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
 
-        print("HoverTableView handleMouseMove row: \(row), lastHoveredRow: \(lastHoveredRow)")
-
-        if row >= 0 && row != lastHoveredRow {
-            print("Calling onMouseDraggedOverRow callback for row \(row)")
-            lastHoveredRow = row
-            onMouseDraggedOverRow?(row)
+        // Track if we've moved to a different row than where we pressed down
+        if row != mouseDownRow {
+            hasDraggedToNewRow = true
         }
+
+        // Notify parent of drag
+        onMouseDraggedOverRow?(row)
+    }
+
+    // Get row at a global screen point (for cross-window hover detection)
+    func rowAtScreenPoint(_ screenPoint: NSPoint) -> Int {
+        guard let window = self.window else { return -1 }
+
+        // Convert screen point to window coordinates
+        let screenRect = NSRect(origin: screenPoint, size: .zero)
+        let windowRect = window.convertFromScreen(screenRect)
+        let windowPoint = windowRect.origin
+
+        // Convert window point to view coordinates
+        let viewPoint = self.convert(windowPoint, from: nil)
+
+        return self.row(at: viewPoint)
     }
 }

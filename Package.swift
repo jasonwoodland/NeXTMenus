@@ -28,7 +28,8 @@ let package = Package(
                 "MenuWindowController.swift",
                 "SubmenuWindowController.swift",
                 "NonActivatingWindow.swift",
-                "HoverTableView.swift"
+                "HoverTableView.swift",
+                "CenteredLabel.swift"
             ]
         )
     ]

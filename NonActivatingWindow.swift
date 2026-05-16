@@ -13,15 +13,24 @@ class NonActivatingWindow: NSPanel {
         return false
     }
 
+    // Don't let AppKit push the window out of the menu-bar area, so it can
+    // sit flush with the top of the screen (e.g. when the menu bar is hidden).
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        return frameRect
+    }
+
 
     override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
 
-        // Panel-specific settings to prevent activation
-        self.isFloatingPanel = true
-        self.becomesKeyOnlyIfNeeded = false
+        // Panel-specific settings
+        // self.isFloatingPanel = true TODO
+        self.becomesKeyOnlyIfNeeded = true  // Allow becoming key when clicked
         self.hidesOnDeactivate = false
         self.worksWhenModal = true
+
+        // Disable the system fade-in/out animation when the window is shown
+        self.animationBehavior = .none
 
         // Setup translucent glass appearance
         setupGlassEffect()
@@ -39,6 +48,13 @@ class NonActivatingWindow: NSPanel {
 
         // Make the visual effect view transparent
         visualEffectView.alphaValue = 1
+
+        // Round the glass slightly tighter than the system window corner.
+        // Tune `cornerRadius` to taste.
+        visualEffectView.wantsLayer = true
+        visualEffectView.layer?.cornerRadius = 10
+        visualEffectView.layer?.cornerCurve = .continuous
+        visualEffectView.layer?.masksToBounds = true
 
         // Set the visual effect view as the content view
         self.contentView = visualEffectView

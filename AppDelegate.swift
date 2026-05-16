@@ -64,6 +64,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 targetApp: app
             )
             menuWindowControllers[pid] = menuWindowController
+            menuWindowController.resetPosition()
+
+            // Pre-extract the full submenu tree off the main thread so that
+            // submenus open instantly later, with no on-demand extraction.
+            let controller = menuWindowController
+            DispatchQueue.global(qos: .userInitiated).async {
+                let full = MenuExtractor.extractFullMenu(from: app)
+                DispatchQueue.main.async {
+                    controller.applyFullMenu(appMenuItem: full.appMenuItem,
+                                             menuItems: full.menuItems)
+                }
+            }
         }
 
         // Hide all other windows
