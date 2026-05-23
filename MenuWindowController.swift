@@ -23,6 +23,31 @@ class MenuWindowController: NSWindowController {
     // True while the pointer is in a child submenu rather than this menu.
     private var childHasMouse = false
 
+    // Trailing actions appended after the menu bar items: Hide and Quit the
+    // target app. Source of truth for row mapping and execution.
+    private enum TrailingAction: CaseIterable {
+        case hide, quit
+        var title: String { self == .hide ? "Hide" : "Quit" }
+        var shortcutGlyph: String { self == .hide ? "⌘H" : "⌘Q" }
+    }
+
+    // Override hover/selection on a specific row while it flashes after a
+    // click. Mirrors the SubmenuWindowController flash mechanism.
+    private var flashState: (row: Int, on: Bool)?
+
+    // Row the mouse is currently pressed on (-1 / nil = none). Used to give
+    // trailing-action rows a press-only selection (no plain-hover highlight).
+    private var pressedRow: Int?
+
+    private var firstTrailingActionRow: Int { 1 + visibleMenuItems.count }
+
+    private func trailingAction(at row: Int) -> TrailingAction? {
+        let start = firstTrailingActionRow
+        let all = TrailingAction.allCases
+        guard row >= start, row < start + all.count else { return nil }
+        return all[row - start]
+    }
+
     // Track window movement completion
     private var moveTimer: Timer?
 
@@ -69,9 +94,9 @@ class MenuWindowController: NSWindowController {
 
         // Calculate window height based on number of items
         // Add 1 for the "Info" row (app menu)
-        let numberOfRows = menuItems.count + 1
+        let numberOfRows = menuItems.count + 1 + TrailingAction.allCases.count
         let contentHeight = CGFloat(numberOfRows) * rowHeight
-        let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin
+        let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin - 1
 
         // Create window with initial frame (will be positioned when shown)
         let window = NonActivatingWindow(
@@ -351,8 +376,15 @@ class MenuWindowController: NSWindowController {
         defer {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
+        pressedRow = row >= 0 ? row : nil
         guard row >= 0 else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+
+        // Trailing actions act on mouse-up; the press shows selection feedback
+        if trailingAction(at: row) != nil {
+            updateAllRowHighlights()
+            return
+        }
 
         let menuItem: MenuItem?
         if row == 0 {
@@ -390,16 +422,30 @@ class MenuWindowController: NSWindowController {
     // pointer is over the child window itself.
     private func updateOpenSubmenu(forHoveredRow row: Int) {
         if row < 0 {
-            // Dragging off the menu items: close the submenu unless the
-            // pointer is over the child window.
-            if isDragging, childSubmenuRow != nil,
-               !(childSubmenuController?.window?.frame.contains(NSEvent.mouseLocation) ?? false) {
-                collapseSubmenus()
-            }
+            // Off the menu items - leave any open submenu alone. The mouse
+            // routinely crosses deadspace while moving between parent and
+            // child windows (especially with short submenus), so we don't
+            // close here. Closing happens deliberately on sibling-hover or
+            // mouse-up.
             return
         }
         if childSubmenuRow == row { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+        // Trailing actions don't have submenus; hovering one (during a drag
+        // or with a submenu open) collapses whatever is open.
+        if trailingAction(at: row) != nil {
+            if childSubmenuRow != nil {
+                collapseSubmenus()
+            }
+            return
+        }
+        // While click-dragging with a submenu already open, hovering a sibling
+        // closes the open submenu rather than switching - the drag is
+        // committed to the row that started it.
+        if isDragging, childSubmenuRow != nil {
+            collapseSubmenus()
+            return
+        }
         let menuItem: MenuItem?
         if row == 0 {
             menuItem = appMenuItem
@@ -448,7 +494,7 @@ class MenuWindowController: NSWindowController {
     // Resize the window so it exactly fits the current table content.
     private func resizeWindowToFitContent() {
         let contentH = tableContentHeight()
-        let height = contentH + titleBarHeight + Self.bottomMargin
+        let height = contentH + titleBarHeight + Self.bottomMargin - 1
         var frame = menuWindow.frame
         frame.origin.y += frame.size.height - height  // keep the top edge fixed
         frame.size.height = height
@@ -533,8 +579,8 @@ class MenuWindowController: NSWindowController {
 // MARK: - NSTableViewDataSource
 extension MenuWindowController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        // Add 1 for the "Info" row
-        return visibleMenuItems.count + 1
+        // 1 for "Info" + the menu bar items + the trailing Hide/Quit actions
+        return 1 + visibleMenuItems.count + TrailingAction.allCases.count
     }
 }
 
@@ -580,14 +626,48 @@ extension MenuWindowController: NSTableViewDelegate {
             chevronView.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .bold))
             chevronView.imageScaling = .scaleNone
-            chevronView.imageAlignment = .alignCenter
+            chevronView.imageAlignment = .alignRight
             chevronView.identifier = NSUserInterfaceItemIdentifier("ChevronView")
             cell?.addSubview(chevronView)
+
+            // Right-aligned shortcut (shown for the trailing Hide/Quit rows).
+            // Rendered as fixed-width cells via ShortcutView; sized per
+            // configure() since the cell count varies.
+            let shortcutField = ShortcutView(frame: NSRect(x: windowWidth - 16, y: 0, width: 0, height: rowHeight))
+            shortcutField.identifier = NSUserInterfaceItemIdentifier("ShortcutField")
+            shortcutField.isHidden = true
+            cell?.addSubview(shortcutField)
         }
 
         let chevronView = cell?.subviews.first {
             $0.identifier == NSUserInterfaceItemIdentifier("ChevronView")
         } as? NSImageView
+        let shortcutField = cell?.subviews.first {
+            $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField")
+        } as? ShortcutView
+
+        // Trailing actions (Hide / Quit the target app) - no chevron, with
+        // the keyboard shortcut on the right
+        if let action = trailingAction(at: row) {
+            cell?.textField?.isHidden = false
+            cell?.textField?.stringValue = action.title
+            cell?.textField?.font = NSFont.systemFont(ofSize: 13)
+            cell?.textField?.textColor = .labelColor
+            chevronView?.isHidden = true
+            // Same fixed-cell rendering as SubmenuWindowController.
+            shortcutField?.isHidden = false
+            let key = action.shortcutGlyph
+            let w = ShortcutView.intrinsicWidth(for: key)
+            let trailingX = windowWidth - 16
+            shortcutField?.frame = NSRect(x: trailingX - w, y: 0, width: w, height: rowHeight)
+            shortcutField?.configure(with: key)
+            let separatorId = NSUserInterfaceItemIdentifier("Separator")
+            cell?.subviews.first(where: { $0.identifier == separatorId })?.removeFromSuperview()
+            return cell
+        }
+
+        // Non-trailing rows don't show the shortcut field
+        shortcutField?.isHidden = true
 
         // First row is "Info" (the app menu)
         if row == 0 {
@@ -641,10 +721,12 @@ extension MenuWindowController: NSTableViewDelegate {
         // Don't allow selection of disabled items or separators
         if row == 0 {
             return appMenuItem?.isEnabled ?? true
-        } else {
-            let menuItem = visibleMenuItems[row - 1]
-            return menuItem.isEnabled && !menuItem.isSeparator
         }
+        if trailingAction(at: row) != nil {
+            return true
+        }
+        let menuItem = visibleMenuItems[row - 1]
+        return menuItem.isEnabled && !menuItem.isSeparator
     }
 
     func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
@@ -655,14 +737,25 @@ extension MenuWindowController: NSTableViewDelegate {
     private func updateRowHighlight(forRow row: Int) {
         guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
 
-        // Only enabled, non-separator rows can be highlighted
-        let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
-
-        // Highlight if this row has an open submenu, or if it's being hovered
-        // while a sibling already has an open submenu or a drag is in progress
-        let isHighlighted = hoverable
-            && ((childSubmenuRow == row)
-                || (hoveredRow == row && (childSubmenuRow != nil || isDragging)))
+        // Flash overrides everything else (used by trailing-action click)
+        let isHighlighted: Bool
+        if let flashState = flashState, flashState.row == row {
+            isHighlighted = flashState.on
+        } else {
+            // Only enabled, non-separator rows can be highlighted
+            let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
+            if trailingAction(at: row) != nil {
+                // Trailing actions (Hide / Quit) don't highlight on plain
+                // hover - only when pressed or click-dragged onto.
+                isHighlighted = hoverable
+                    && hoveredRow == row
+                    && (pressedRow == row || isDragging)
+            } else {
+                isHighlighted = hoverable
+                    && ((childSubmenuRow == row)
+                        || (hoveredRow == row && (childSubmenuRow != nil || isDragging)))
+            }
+        }
 
         let highlightView = cellView.subviews.first {
             $0.identifier == NSUserInterfaceItemIdentifier("BackgroundView")
@@ -675,17 +768,73 @@ extension MenuWindowController: NSTableViewDelegate {
             effect.isEmphasized = !inChild
         }
         cellView.backgroundStyle = isHighlighted ? .emphasized : .normal
+        // ShortcutView's text labels aren't covered by NSTableCellView's
+        // textField propagation, so push the emphasis state to them too.
+        let shortcutField = cellView.subviews.first {
+            $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField")
+        } as? ShortcutView
+        shortcutField?.setEmphasized(isHighlighted)
     }
 
     // Handle mouse up - submenu opening is handled on mouse down
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
         isDragging = false
+        pressedRow = nil
+        // Trailing actions (Hide / Quit) fire on release, with a flash
+        if let action = trailingAction(at: row) {
+            performTrailingAction(action, at: row)
+            return
+        }
+        // Released off any menu item or outside the menu window - clear hover
+        // and collapse any open submenu.
+        if row < 0 {
+            hoveredRow = nil
+            if childSubmenuRow != nil {
+                collapseSubmenus()
+            } else {
+                updateAllRowHighlights()
+            }
+            return
+        }
         // A click-drag released on a menu item closes its open submenu
-        if wasDragged, row >= 0, childSubmenuRow == row {
+        if wasDragged, childSubmenuRow == row {
             collapseSubmenus()
         }
         // A click can also raise this window on mouse-up; keep the chain on top
         DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
+    }
+
+    private func performTrailingAction(_ action: TrailingAction, at row: Int) {
+        collapseSubmenus()
+        flashRow(row) { [weak self] in
+            guard let self = self else { return }
+            switch action {
+            case .hide:
+                self.targetApp?.hide()
+            case .quit:
+                self.targetApp?.terminate()
+            }
+        }
+    }
+
+    // Briefly blink a row's highlight then run completion (like a native menu).
+    private func flashRow(_ row: Int, completion: @escaping () -> Void) {
+        var step = 0
+        let totalSteps = 4
+        flashState = (row, false)
+        updateRowHighlight(forRow: row)
+        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            step += 1
+            self.flashState = (row, step % 2 == 0)
+            self.updateRowHighlight(forRow: row)
+            if step >= totalSteps {
+                timer.invalidate()
+                self.flashState = nil
+                self.updateRowHighlight(forRow: row)
+                completion()
+            }
+        }
     }
 
     // Handle long press release - close menus

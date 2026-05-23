@@ -118,7 +118,7 @@ class SubmenuWindowController: NSWindowController {
         let separatorCount = menuItems.filter { $0.isSeparator }.count
         let contentHeight = CGFloat(menuItems.count - separatorCount) * rowHeight
             + CGFloat(separatorCount) * separatorRowHeight
-        let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin
+        let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin - 1
 
         // Create window with initial frame (will be positioned when shown)
         let window = NonActivatingWindow(
@@ -635,16 +635,23 @@ class SubmenuWindowController: NSWindowController {
     // it's left open only if the pointer is over the child window itself.
     private func updateOpenSubmenu(forHoveredRow row: Int) {
         if row < 0 {
-            // Dragging off the menu items: close the submenu unless the
-            // pointer is over the child window.
-            if isDragging, childSubmenuRow != nil,
-               !(childSubmenuController?.window?.frame.contains(NSEvent.mouseLocation) ?? false) {
-                closeSubmenu()
-                updateAllRowHighlights()
-            }
+            // Off the menu items - leave any open submenu alone. The mouse
+            // routinely crosses deadspace while moving between parent and
+            // child windows (especially with short submenus), so we don't
+            // close here. Closing happens deliberately on sibling-hover or
+            // mouse-up.
             return
         }
         if childSubmenuRow == row { return }
+
+        // While click-dragging with a submenu already open, hovering a sibling
+        // closes the open submenu rather than switching - the drag is
+        // committed to the row that started it.
+        if isDragging, childSubmenuRow != nil {
+            closeSubmenu()
+            updateAllRowHighlights()
+            return
+        }
 
         if tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
            row < visibleMenuItems.count {
@@ -716,14 +723,11 @@ class SubmenuWindowController: NSWindowController {
         return ceil(w) + 2
     }
 
-    // Width occupied by the keyboard-shortcut text, with a small safety margin.
-    // Used for both window sizing and cell layout so they can't diverge.
+    // Width occupied by the keyboard-shortcut text, computed from the same
+    // fixed-cell layout ShortcutView uses, so window sizing and cell layout
+    // can't diverge.
     private static func shortcutWidth(for key: String) -> CGFloat {
-        guard !key.isEmpty else { return 0 }
-        let w = NSAttributedString(string: key, attributes: [
-            .font: NSFont.systemFont(ofSize: 13), .kern: 2.0
-        ]).size().width
-        return ceil(w) + 2
+        return ShortcutView.intrinsicWidth(for: key)
     }
 
     // Window width that fits the widest item (title + shortcut/chevron),
@@ -746,7 +750,7 @@ class SubmenuWindowController: NSWindowController {
     // Resize the window so it exactly fits the current table content.
     private func resizeWindowToFitContent() {
         let contentH = tableContentHeight()
-        let height = contentH + titleBarHeight + Self.bottomMargin
+        let height = contentH + titleBarHeight + Self.bottomMargin - 1
         var frame = submenuWindow.frame
         frame.origin.y += frame.size.height - height  // keep the top edge fixed
         frame.size.height = height
@@ -1004,19 +1008,12 @@ extension SubmenuWindowController: NSTableViewDelegate {
             markField.identifier = NSUserInterfaceItemIdentifier("MarkField")
             cell?.addSubview(markField)
 
-            // Keyboard shortcut / chevron on the right
-            let shortcutWidth: CGFloat = 56
-            let shortcutField = CenteredLabel(frame: NSRect(x: windowWidth - 16 - shortcutWidth, y: 0, width: shortcutWidth, height: rowHeight))
-            shortcutField.isBordered = false
-            shortcutField.backgroundColor = .clear
-            shortcutField.isEditable = false
-            shortcutField.isSelectable = false
-            shortcutField.drawsBackground = false
-            shortcutField.alignment = .right
-            shortcutField.font = NSFont.systemFont(ofSize: 13)
-            shortcutField.usesSingleLineMode = true
-            shortcutField.identifier = NSUserInterfaceItemIdentifier("ShortcutField")
-            cell?.addSubview(shortcutField)
+            // Keyboard shortcut on the right - rendered as fixed-width cells
+            // (matching the native menu) by ShortcutView. Position is set per
+            // configure() since the cell count varies.
+            let shortcutView = ShortcutView(frame: NSRect(x: windowWidth - 16, y: 0, width: 0, height: rowHeight))
+            shortcutView.identifier = NSUserInterfaceItemIdentifier("ShortcutField")
+            cell?.addSubview(shortcutView)
 
             // Disclosure chevron (SF Symbol) for submenu items, sized to match
             // the leading mark glyph
@@ -1024,7 +1021,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
             chevronView.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .bold))
             chevronView.imageScaling = .scaleNone
-            chevronView.imageAlignment = .alignCenter
+            chevronView.imageAlignment = .alignRight
             chevronView.identifier = NSUserInterfaceItemIdentifier("ChevronView")
             cell?.addSubview(chevronView)
 
@@ -1046,7 +1043,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
         let menuItem = visibleMenuItems[row]
 
         let markField = cell?.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier("MarkField") }) as? NSTextField
-        let shortcutField = cell?.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField") }) as? NSTextField
+        let shortcutField = cell?.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField") }) as? ShortcutView
         let chevronView = cell?.subviews.first(where: { $0.identifier == NSUserInterfaceItemIdentifier("ChevronView") }) as? NSImageView
 
         // Frame the fixed-position subviews explicitly each time: cells are
@@ -1107,19 +1104,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
                 chevronView?.isHidden = true
                 shortcutField?.isHidden = false
                 let key = menuItem.keyEquivalent ?? ""
-                shortcutField?.font = NSFont.systemFont(ofSize: 13)
-                shortcutField?.attributedStringValue = NSAttributedString(
-                    string: key,
-                    attributes: [
-                        .font: NSFont.systemFont(ofSize: 13),
-                        .foregroundColor: NSColor.quaternaryLabelColor,
-                        .kern: 2.0
-                    ]
-                )
                 // Use the shared width measurement so the title's budgeted
                 // space (in computeContentWidth) matches its actual space.
                 let w = Self.shortcutWidth(for: key)
                 shortcutField?.frame = NSRect(x: trailingX - w, y: 0, width: w, height: rowHeight)
+                shortcutField?.configure(with: key)
                 titleRight = trailingX - w
             }
             cell?.textField?.frame = NSRect(
@@ -1184,6 +1173,12 @@ extension SubmenuWindowController: NSTableViewDelegate {
             effect.isEmphasized = !inChild
         }
         cellView.backgroundStyle = isHighlighted ? .emphasized : .normal
+        // ShortcutView's text labels aren't covered by NSTableCellView's
+        // textField propagation, so push the emphasis state to them too.
+        let shortcutField = cellView.subviews.first {
+            $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField")
+        } as? ShortcutView
+        shortcutField?.setEmphasized(isHighlighted)
     }
 
     private func handleMouseClickedRow(_ row: Int) {
@@ -1220,7 +1215,17 @@ extension SubmenuWindowController: NSTableViewDelegate {
         defer {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
-        guard row >= 0 && row < visibleMenuItems.count else { return }
+        // Released off any menu item or outside the menu window - clear hover
+        // and collapse any open submenu.
+        if row < 0 {
+            hoveredRow = nil
+            if childSubmenuRow != nil {
+                closeSubmenu()
+            }
+            updateAllRowHighlights()
+            return
+        }
+        guard row < visibleMenuItems.count else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
         let menuItem = visibleMenuItems[row]

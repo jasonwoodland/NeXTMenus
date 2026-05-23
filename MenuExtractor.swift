@@ -265,6 +265,20 @@ class MenuExtractor {
                 shortcutKey = glyphSymbol(for: cmdGlyph)
             }
 
+            // True if the underlying key is a regular printable character.
+            // Used as a heuristic for the Fn (Globe) modifier: Carbon has no
+            // Fn bit, but shortcuts that suppress Command on a printable key
+            // are almost always Fn-modified (e.g. Fn+E for Emoji & Symbols).
+            // Function keys, Tab, arrows, etc. are non-printable so we don't
+            // add a globe for them (e.g. Ctrl+Tab stays as ⌃⇥).
+            let wasPrintableKey: Bool = {
+                guard let scalar = keyChar?.unicodeScalars.first else { return false }
+                if functionKeySymbol(scalar) != nil { return false }
+                if CharacterSet.controlCharacters.contains(scalar) { return false }
+                if CharacterSet.whitespacesAndNewlines.contains(scalar) { return false }
+                return true
+            }()
+
             // Build the key equivalent string. The cmd-modifiers mask uses
             // Carbon semantics: Command is implied unless the "no command" bit
             // (8) is set; bits 1/2/4 add Shift/Option/Control.
@@ -275,7 +289,11 @@ class MenuExtractor {
                 if mods & 4 != 0 { keyString += "⌃" } // Control
                 if mods & 2 != 0 { keyString += "⌥" } // Option
                 if mods & 1 != 0 { keyString += "⇧" } // Shift
-                if mods & 8 == 0 { keyString += "⌘" } // Command (implied unless suppressed)
+                if mods & 8 == 0 {
+                    keyString += "⌘" // Command (implied unless suppressed)
+                } else if wasPrintableKey {
+                    keyString += "🌐" // Globe / Fn substitute
+                }
                 keyString += shortcutKey
                 keyEquivalent = keyString
             }
