@@ -428,7 +428,7 @@ class SubmenuWindowController: NSWindowController {
         guard !isTornOff else { return }
 
         let parentFrame = parentWindow.frame
-        let xPos = parentFrame.maxX
+        let xPos = parentFrame.maxX - 6  // shift 6pt left to overlap parent
         // Align tops: parent's top (maxY) minus child's height gives child's bottom (origin.y)
         let yPos = parentFrame.maxY - submenuWindow.frame.height
 
@@ -519,6 +519,10 @@ class SubmenuWindowController: NSWindowController {
             self?.handleMouseLongPressReleased(row)
         }
 
+        tableView.onMouseExited = { [weak self] in
+            self?.handleMouseExited()
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
@@ -549,6 +553,15 @@ class SubmenuWindowController: NSWindowController {
                 // Attached to the chain: plain hover opens/switches freely.
                 updateOpenSubmenu(forHoveredRow: row)
             }
+        }
+    }
+
+    // Pointer left the table - clear the hover highlight (the open-submenu
+    // row stays highlighted via childSubmenuRow).
+    private func handleMouseExited() {
+        if hoveredRow != nil {
+            hoveredRow = nil
+            updateAllRowHighlights()
         }
     }
 
@@ -870,7 +883,7 @@ class SubmenuWindowController: NSWindowController {
     func showWindow(rightOf parentWindow: NSWindow, alignedToRow row: Int? = nil) {
         // Position to the right of the parent window with tops aligned
         let parentFrame = parentWindow.frame
-        let xPos = parentFrame.maxX
+        let xPos = parentFrame.maxX - 6  // shift 6pt left to overlap parent
         // Align tops: parent's top (maxY) minus child's height gives child's bottom (origin.y)
         let yPos = parentFrame.maxY - submenuWindow.frame.height
 
@@ -1063,7 +1076,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
                 cell?.addSubview(v)
                 line = v
             }
-            line.frame = NSRect(x: 8, y: separatorRowHeight / 2 - 0.5, width: windowWidth - 16, height: 1)
+            line.frame = NSRect(x: 16, y: separatorRowHeight / 2 - 0.5, width: windowWidth - 32, height: 1)
             line.layer?.backgroundColor = Self.separatorLineColor.cgColor
         } else {
             let titleX = Self.titleX

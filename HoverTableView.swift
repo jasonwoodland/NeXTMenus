@@ -6,6 +6,7 @@ class HoverTableView: NSTableView {
     var onMouseDown: ((Int) -> Void)?
     var onMouseUp: ((Int, Bool) -> Void)?  // (row, wasDragged)
     var onMouseLongPressReleased: ((Int) -> Void)?
+    var onMouseExited: (() -> Void)?  // Mouse left the table entirely
 
     private var mouseDownRow: Int = -1
     private var mouseDownTimestamp: Date?
@@ -34,6 +35,10 @@ class HoverTableView: NSTableView {
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
         onMouseMoved?(row)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onMouseExited?()
     }
 
     override func mouseDown(with event: NSEvent) {

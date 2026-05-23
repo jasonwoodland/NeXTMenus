@@ -18,6 +18,8 @@ struct MenuItem {
     // AXMenuItem attributes
     let cmdGlyph: Int? // kAXMenuItemCmdGlyph - special-key glyph code for the shortcut
     let markChar: String? // kAXMenuItemMarkChar - mark character (e.g. "✓" for checked items)
+    let cmdChar: String? // kAXMenuItemCmdChar - raw shortcut character (used to detect alternates)
+    let cmdModifiers: Int? // kAXMenuItemCmdModifiers - raw modifier mask (used to detect alternates)
 }
 
 class MenuExtractor {
@@ -95,7 +97,9 @@ class MenuExtractor {
             isAlternate: false,
             alternateTitle: nil,
             cmdGlyph: nil,
-            markChar: nil
+            markChar: nil,
+            cmdChar: nil,
+            cmdModifiers: nil
         )
     }
 
@@ -276,6 +280,17 @@ class MenuExtractor {
                 keyEquivalent = keyString
             }
 
+            // AX exposes kAXMenuItemPrimaryUIElement, but in practice it
+            // returns a UIElement reference for non-alternate items too (so
+            // it can't be used as an "is this an alternate?" signal). Fall
+            // back to a narrow whitelist of macOS-shipped alternate titles.
+            var derivedIsAlternate = false
+            var derivedRequiredModifiers: NSEvent.ModifierFlags? = nil
+            if let flags = Self.standardAlternateModifiers(for: title) {
+                derivedIsAlternate = true
+                derivedRequiredModifiers = flags
+            }
+
             allItems.append(MenuItem(
                 title: title,
                 isEnabled: isEnabled,
@@ -284,75 +299,52 @@ class MenuExtractor {
                 element: child,
                 submenuItems: [],
                 keyEquivalent: keyEquivalent,
-                requiredModifiers: nil,
-                isAlternate: false,
+                requiredModifiers: derivedRequiredModifiers,
+                isAlternate: derivedIsAlternate,
                 alternateTitle: nil,
                 cmdGlyph: cmdGlyph,
-                markChar: markChar
+                markChar: markChar,
+                cmdChar: keyChar,
+                cmdModifiers: modifiers
             ))
         }
 
-        // Second pass: identify alternates
-        // Look for consecutive items that appear to be alternates of each other
-        for i in 0..<allItems.count {
-            guard i + 1 < allItems.count else { continue }
-
-            let item1 = allItems[i]
-            let item2 = allItems[i + 1]
-
-            // Skip if either is a separator
-            if item1.isSeparator || item2.isSeparator { continue }
-
-            // Skip if they have different enabled states or submenu status
-            if item1.isEnabled != item2.isEnabled || item1.hasSubmenu != item2.hasSubmenu { continue }
-
-            let title1 = item1.title.lowercased()
-            let title2 = item2.title.lowercased()
-
-            // Check if they're alternates based on common patterns
-            let areAlternates = checkIfAlternates(title1: title1, title2: title2)
-
-            if areAlternates {
-                // Mark the appropriate one as alternate
-                // Usually the longer/more specific one is the alternate
-                if title2.contains("all") || title2.contains("alternative") ||
-                   title2.count > title1.count {
-                    // Second item is the alternate (shown with modifiers)
-                    allItems[i + 1] = MenuItem(
-                        title: item2.title,
-                        isEnabled: item2.isEnabled,
-                        hasSubmenu: item2.hasSubmenu,
-                        isSeparator: item2.isSeparator,
-                        element: item2.element,
-                        submenuItems: item2.submenuItems,
-                        keyEquivalent: item2.keyEquivalent,
-                        requiredModifiers: .option,
-                        isAlternate: true,
-                        alternateTitle: nil,
-                        cmdGlyph: item2.cmdGlyph,
-                        markChar: item2.markChar
-                    )
-                } else if title1.contains("all") || title1.contains("alternative") {
-                    // First item is the alternate
-                    allItems[i] = MenuItem(
-                        title: item1.title,
-                        isEnabled: item1.isEnabled,
-                        hasSubmenu: item1.hasSubmenu,
-                        isSeparator: item1.isSeparator,
-                        element: item1.element,
-                        submenuItems: item1.submenuItems,
-                        keyEquivalent: item1.keyEquivalent,
-                        requiredModifiers: .option,
-                        isAlternate: true,
-                        alternateTitle: nil,
-                        cmdGlyph: item1.cmdGlyph,
-                        markChar: item1.markChar
-                    )
-                }
-            }
-        }
+        // Alternate detection lives in the first pass now: position-equality
+        // with the previous non-separator item (plus same shortcut + extra
+        // modifier) is reliable. Title-pattern heuristics ("Close" matching
+        // "Close All Windows" etc.) fire on sibling items that aren't actually
+        // alternates, so they're intentionally not used.
 
         return allItems
+    }
+
+    // Decodes the Carbon menu modifier mask into NSEvent.ModifierFlags
+    // (Option/Shift/Control bits only - Command is implied).
+    private static func modifierFlags(fromMask mods: Int?) -> NSEvent.ModifierFlags? {
+        guard let mods = mods else { return nil }
+        var flags = NSEvent.ModifierFlags()
+        if mods & 2 != 0 { flags.insert(.option) }
+        if mods & 1 != 0 { flags.insert(.shift) }
+        if mods & 4 != 0 { flags.insert(.control) }
+        return flags.isEmpty ? nil : flags
+    }
+
+    // Titles of well-known standard macOS alternate menu items - those that
+    // ship with AppKit and that the native menu collapses behind Option.
+    // App-specific .isAlternate items aren't covered here (AX doesn't expose
+    // NSMenuItem.isAlternate, so we can't detect those generically).
+    private static func standardAlternateModifiers(for title: String) -> NSEvent.ModifierFlags? {
+        switch title {
+        case "Minimize All",
+             "Zoom All",
+             "Arrange in Front",
+             "Quit and Close Windows",
+             "Quit and Close All Windows",
+             "Quit and Keep Windows":
+            return .option
+        default:
+            return nil
+        }
     }
 
     // Maps a kAXMenuItemCmdGlyph code (Carbon Menus.h glyph constants) to a

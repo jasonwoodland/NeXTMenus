@@ -67,21 +67,21 @@ enum MenuItemVisibility {
             }
 
             if item.isAlternate {
-                if modifierState.showsAlternates {
+                if matches(item.requiredModifiers, state: modifierState) {
                     filtered.append(item)
                 }
                 continue
             }
 
-            let hasAlternateImmediatelyAfter: Bool
-            if index + 1 < menuItems.count {
-                let nextItem = menuItems[index + 1]
-                hasAlternateImmediatelyAfter = nextItem.isAlternate && !nextItem.isSeparator
-            } else {
-                hasAlternateImmediatelyAfter = false
-            }
+            // Hide the primary when its alternate (immediately after) is shown
+            let alternateShown: Bool = {
+                guard index + 1 < menuItems.count else { return false }
+                let next = menuItems[index + 1]
+                guard next.isAlternate, !next.isSeparator else { return false }
+                return matches(next.requiredModifiers, state: modifierState)
+            }()
 
-            if !hasAlternateImmediatelyAfter || !modifierState.showsAlternates {
+            if !alternateShown {
                 filtered.append(item)
             }
         }
@@ -100,5 +100,19 @@ enum MenuItemVisibility {
             result.removeLast()
         }
         return result
+    }
+
+    // True if the current modifier state satisfies an alternate item's
+    // required modifier. nil/empty falls back to "any modifier shows it" so
+    // older extracted items still work.
+    private static func matches(_ required: NSEvent.ModifierFlags?,
+                                state: MenuModifierState) -> Bool {
+        guard let required = required, !required.isEmpty else {
+            return state.showsAlternates
+        }
+        if required.contains(.option),  state.hasOption  { return true }
+        if required.contains(.shift),   state.hasShift   { return true }
+        if required.contains(.control), state.hasControl { return true }
+        return false
     }
 }

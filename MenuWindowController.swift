@@ -296,6 +296,10 @@ class MenuWindowController: NSWindowController {
             self?.handleMouseLongPressReleased(row)
         }
 
+        tableView.onMouseExited = { [weak self] in
+            self?.handleMouseExited()
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
@@ -321,6 +325,15 @@ class MenuWindowController: NSWindowController {
         // Once a submenu is open, hovering a sibling switches to its submenu
         if rowChanged, childSubmenuRow != nil {
             updateOpenSubmenu(forHoveredRow: row)
+        }
+    }
+
+    // Pointer left the table - clear the hover highlight (the open-submenu
+    // row stays highlighted via childSubmenuRow).
+    private func handleMouseExited() {
+        if hoveredRow != nil {
+            hoveredRow = nil
+            updateAllRowHighlights()
         }
     }
 
