@@ -1244,12 +1244,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
         performAction(element, at: row)
     }
 
-    // Handle long press release - close menus
+    // Handle long press release - a slow click is still a click. Route
+    // through the normal mouseup path so leaf actions fire and submenu
+    // state stays correct.
     private func handleMouseLongPressReleased(_ row: Int) {
-        closeSubmenu()
-        hoveredRow = nil
-        isDragging = false
-        updateAllRowHighlights()
+        handleMouseUp(row, wasDragged: false)
     }
 
     // Execute action at row (called from parent window)

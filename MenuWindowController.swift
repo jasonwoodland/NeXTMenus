@@ -39,6 +39,18 @@ class MenuWindowController: NSWindowController {
     // trailing-action rows a press-only selection (no plain-hover highlight).
     private var pressedRow: Int?
 
+    // True if the row pressed on had its submenu already open at mousedown.
+    // The toggle-close fires on the matching mouseup (matching the native
+    // menu bar behavior - mousedown doesn't close, mouseup does).
+    private var pressedRowWasOpen: Bool = false
+
+    // True after a click has opened a submenu and the menu is in "tracking
+    // mode" - hovering siblings switches the open submenu, and hovering a
+    // trailing action (Hide / Quit) highlights it and closes the submenu
+    // without leaving tracking mode. Reset when the menu is dismissed
+    // (action performed, toggle-close, mouseup off the menu, etc.).
+    private var isMenuActive: Bool = false
+
     private var firstTrailingActionRow: Int { 1 + visibleMenuItems.count }
 
     private func trailingAction(at row: Int) -> TrailingAction? {
@@ -57,6 +69,10 @@ class MenuWindowController: NSWindowController {
 
     // Track local event monitor for cross-window drag
     private var localDragMonitor: Any?
+
+    // Global monitor: a click outside any of our windows (i.e. in the target
+    // app) exits the click-open tracking mode.
+    private var clickOutsideMonitor: Any?
 
     // Modifier key tracking
     private var currentModifierFlags: NSEvent.ModifierFlags = []
@@ -162,6 +178,8 @@ class MenuWindowController: NSWindowController {
 
         // Set up modifier key monitoring
         setupModifierMonitor()
+        // Dismiss tracking when the user clicks anywhere outside our windows
+        setupClickOutsideMonitor()
     }
 
     private func setupDragMonitor() {
@@ -191,6 +209,19 @@ class MenuWindowController: NSWindowController {
             }
 
             return event
+        }
+    }
+
+    private func setupClickOutsideMonitor() {
+        // Global monitor fires only for events delivered to *other* apps -
+        // clicks on our own (non-activating) panels go through local
+        // monitors instead. So any click that reaches this handler is by
+        // definition outside our menu chain: collapse and exit tracking.
+        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+            guard let self = self else { return }
+            if self.isMenuActive || self.childSubmenuRow != nil {
+                self.collapseSubmenus()
+            }
         }
     }
 
@@ -227,6 +258,9 @@ class MenuWindowController: NSWindowController {
             NSEvent.removeMonitor(monitor)
         }
         if let monitor = modifierMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
         }
         NotificationCenter.default.removeObserver(self)
@@ -347,8 +381,11 @@ class MenuWindowController: NSWindowController {
             hoveredRow = row
             updateAllRowHighlights()
         }
-        // Once a submenu is open, hovering a sibling switches to its submenu
-        if rowChanged, childSubmenuRow != nil {
+        // Once a submenu is open (or the menu is in click-open tracking mode),
+        // hovering a sibling switches the open submenu. Tracking mode persists
+        // through trailing-action hovers that close the current submenu, so
+        // hovering a submenu item afterwards still opens it.
+        if rowChanged, childSubmenuRow != nil || isMenuActive {
             updateOpenSubmenu(forHoveredRow: row)
         }
     }
@@ -377,11 +414,21 @@ class MenuWindowController: NSWindowController {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
         pressedRow = row >= 0 ? row : nil
+        pressedRowWasOpen = false
         guard row >= 0 else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
         // Trailing actions act on mouse-up; the press shows selection feedback
         if trailingAction(at: row) != nil {
+            updateAllRowHighlights()
+            return
+        }
+
+        // If this row's submenu is already open, defer the toggle-close to
+        // mouseup (matches native menu bar - the menu doesn't close on
+        // mousedown). Mark it so the mouseup handler knows to toggle.
+        if childSubmenuRow == row {
+            pressedRowWasOpen = true
             updateAllRowHighlights()
             return
         }
@@ -432,10 +479,12 @@ class MenuWindowController: NSWindowController {
         if childSubmenuRow == row { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
         // Trailing actions don't have submenus; hovering one (during a drag
-        // or with a submenu open) collapses whatever is open.
+        // or with a submenu open) collapses whatever is open. Stay in
+        // tracking mode (isMenuActive) so a follow-up hover on a submenu
+        // sibling still opens it.
         if trailingAction(at: row) != nil {
             if childSubmenuRow != nil {
-                collapseSubmenus()
+                collapseSubmenus(endsTracking: false)
             }
             return
         }
@@ -536,10 +585,14 @@ class MenuWindowController: NSWindowController {
     }
 
     // Collapses the whole submenu chain back to this main menu window.
-    func collapseSubmenus() {
+    // `endsTracking` clears the click-open tracking state; pass false when
+    // closing as a hover side-effect (e.g. hovering a trailing action while
+    // a submenu is open) so subsequent hovers can still open submenus.
+    func collapseSubmenus(endsTracking: Bool = true) {
         childSubmenuController?.hideWindow()
         childSubmenuController = nil
         childSubmenuRow = nil
+        if endsTracking { isMenuActive = false }
         updateAllRowHighlights()
     }
 
@@ -746,10 +799,11 @@ extension MenuWindowController: NSTableViewDelegate {
             let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
             if trailingAction(at: row) != nil {
                 // Trailing actions (Hide / Quit) don't highlight on plain
-                // hover - only when pressed or click-dragged onto.
+                // hover - only when pressed, click-dragged onto, or while
+                // the menu is in click-open tracking mode.
                 isHighlighted = hoverable
                     && hoveredRow == row
-                    && (pressedRow == row || isDragging)
+                    && (pressedRow == row || isDragging || isMenuActive)
             } else {
                 isHighlighted = hoverable
                     && ((childSubmenuRow == row)
@@ -778,8 +832,11 @@ extension MenuWindowController: NSTableViewDelegate {
 
     // Handle mouse up - submenu opening is handled on mouse down
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
+        let wasPressedRow = pressedRow
+        let wasPressedRowWasOpen = pressedRowWasOpen
         isDragging = false
         pressedRow = nil
+        pressedRowWasOpen = false
         // Trailing actions (Hide / Quit) fire on release, with a flash
         if let action = trailingAction(at: row) {
             performTrailingAction(action, at: row)
@@ -792,14 +849,21 @@ extension MenuWindowController: NSTableViewDelegate {
             if childSubmenuRow != nil {
                 collapseSubmenus()
             } else {
+                isMenuActive = false
                 updateAllRowHighlights()
             }
             return
         }
-        // A click-drag released on a menu item closes its open submenu
-        if wasDragged, childSubmenuRow == row {
+        // Toggle-close: a click (no drag) on a row that was already showing
+        // its submenu at mousedown closes the chain on release - matches the
+        // native menu bar behavior of mouseup, not mousedown, doing the work.
+        if !wasDragged, wasPressedRowWasOpen, wasPressedRow == row {
             collapseSubmenus()
+            return
         }
+        // Click-drag-and-release on a main menu item triggers it: submenu
+        // parents stay open in tracking mode (don't close the chain), and
+        // the trailing-action branch above already handles Hide / Quit.
         // A click can also raise this window on mouse-up; keep the chain on top
         DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
     }
@@ -839,12 +903,10 @@ extension MenuWindowController: NSTableViewDelegate {
 
     // Handle long press release - close menus
     private func handleMouseLongPressReleased(_ row: Int) {
-        childSubmenuController?.hideWindow()
-        childSubmenuController = nil
-        childSubmenuRow = nil
-        hoveredRow = nil
-        isDragging = false
-        updateAllRowHighlights()
+        // A slow click is still a click - route through the normal mouseup
+        // path so trailing actions (Hide / Quit) fire and submenu open/close
+        // state stays correct.
+        handleMouseUp(row, wasDragged: false)
     }
 
     // Execute action at row (called from child window)
@@ -919,6 +981,7 @@ extension MenuWindowController: NSTableViewDelegate {
                 child.showWindow(rightOf: menuWindow, alignedToRow: row)
             }
             childSubmenuRow = row
+            isMenuActive = true
             updateAllRowHighlights()
         } else {
             // No submenu - this is an action item, execute it

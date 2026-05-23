@@ -23,6 +23,23 @@ struct MenuItem {
 }
 
 class MenuExtractor {
+    /// Whether an app's focused window is in native fullscreen. We use this
+    /// to hide our menu, since the system menu bar is also hidden in that
+    /// state. The "AXFullScreen" attribute is undocumented but widely used.
+    static func isFullscreen(_ app: NSRunningApplication) -> Bool {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var focusedWindowRef: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
+        guard result == .success, let focused = focusedWindowRef else { return false }
+        let window = focused as! AXUIElement
+        var fullscreenRef: AnyObject?
+        let r2 = AXUIElementCopyAttributeValue(
+            window, "AXFullScreen" as CFString, &fullscreenRef)
+        guard r2 == .success else { return false }
+        return (fullscreenRef as? Bool) ?? false
+    }
+
     static func extractMenuItems(from app: NSRunningApplication) -> (appMenuItem: MenuItem?, menuItems: [MenuItem]) {
         var items: [MenuItem] = []
         var appMenuItem: MenuItem?
@@ -276,6 +293,13 @@ class MenuExtractor {
                 if functionKeySymbol(scalar) != nil { return false }
                 if CharacterSet.controlCharacters.contains(scalar) { return false }
                 if CharacterSet.whitespacesAndNewlines.contains(scalar) { return false }
+                // The mic and globe glyphs themselves stand in for the
+                // Fn/Globe-modified action (e.g. Start Dictation shows 🎤 on
+                // its own, not 🌐🎤), so they shouldn't take a globe prefix.
+                switch scalar.value {
+                case 0x1F3A4, 0x1F399, 0x1F310: return false
+                default: break
+                }
                 return true
             }()
 

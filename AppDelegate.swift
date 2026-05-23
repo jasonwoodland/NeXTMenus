@@ -20,9 +20,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleActiveApplicationChange(runningApp)
         }
 
+        // Re-evaluate fullscreen visibility on space changes (entering /
+        // exiting fullscreen swaps to a new space).
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(activeSpaceChanged),
+            name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
+
         // Handle initial active application
         if let activeApp = NSWorkspace.shared.frontmostApplication {
             handleActiveApplicationChange(activeApp)
+        }
+    }
+
+    @objc private func activeSpaceChanged() {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              let controller = menuWindowControllers[app.processIdentifier] else { return }
+        if MenuExtractor.isFullscreen(app) {
+            controller.hideWindow()
+        } else {
+            controller.showWindow()
         }
     }
 
@@ -84,8 +100,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Show this app's window
-        menuWindowController.showWindow()
+        // Skip showing our menu when the target app is in fullscreen -
+        // its own menu bar is hidden, so ours should be too.
+        if MenuExtractor.isFullscreen(app) {
+            menuWindowController.hideWindow()
+        } else {
+            menuWindowController.showWindow()
+        }
     }
 
     // Re-reads an app's menu bar until it's populated. The accessibility menu
