@@ -204,8 +204,11 @@ class MenuWindowController: NSWindowController {
                 self.hoveredRow = nil
                 self.updateAllRowHighlights()
             } else if event.type == .leftMouseUp {
-                // Forward mouse up to child
+                // Forward mouse up to child and consume it so the parent table
+                // doesn't also treat the release as outside itself and collapse
+                // the submenu before the child can flash/perform its action.
                 childController.handleMouseUpFromParent(at: childRow)
+                return nil
             }
 
             return event
