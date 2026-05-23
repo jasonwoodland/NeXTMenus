@@ -1,62 +1,45 @@
-# NextMenus
+# NeXTMenus
 
-A macOS application that displays the menu bar items of the currently active application in a floating window.
+NeXTMenus is a macOS reimplementation experiment inspired by the application menus in the NeXTSTEP operating system.
 
 ## Features
 
-- Observes the currently active macOS application
-- Displays a floating window in the top-left corner with the active app's menu bar items
-- Window title shows the active application name
-- "Info" menu appears at the top of the list
-- Traffic lights (close/minimize/maximize buttons) are hidden
-- Window automatically shows/hides based on active application
-- Always stays on top of other windows
+- Shows the active application's menus in a floating menu
+- Uses an **Info** menu as the application menu, followed by the app's other menus
+- Match macOS's native menu bar styling of disabled items, separators, checkmarks, submenu arrows, and keyboard shortcuts
+- Submenus can be torn off into standalone floating menus
+- Supports modifier-sensitive menu items, so alternates can appear when holding keys like Option
+- Follows the frontmost app and hides when that app is in fullscreen
 
 ## Requirements
 
-- macOS 13.0 or later
-- Accessibility permissions (the app will prompt you on first launch)
+- macOS 13 or later
+- Accessibility permission enabled for NeXTMenus
 
-## Building
+## Accessibility permission
 
-### Option 1: Using Xcode
-1. Open the project in Xcode
-2. Select the NextMenus scheme
-3. Build and run (⌘R)
+On first launch, NeXTMenus asks for Accessibility access. Without it, macOS will not allow the app to read or invoke other applications' menus.
 
-### Option 2: Using Swift Package Manager
+Enable it in:
+
+**System Settings → Privacy & Security → Accessibility**
+
+## Build and run
+
+### Swift Package Manager
+
 ```bash
 swift build
-```
-
-To run:
-```bash
 swift run
 ```
 
-Or build and run the executable:
+Release build:
+
 ```bash
 swift build -c release
-.build/release/NextMenus
+swift run -c release
 ```
 
-## Permissions
+### Xcode
 
-On first launch, the app will request Accessibility permissions. You need to:
-1. Go to System Settings > Privacy & Security > Accessibility
-2. Enable permissions for NextMenus
-
-Without these permissions, the app cannot read menu bar items from other applications.
-
-## How It Works
-
-- **ApplicationObserver**: Monitors active application changes using NSWorkspace notifications
-- **MenuExtractor**: Uses Accessibility APIs to extract menu bar items from the active application
-- **MenuWindowController**: Manages the floating window that displays the menu items
-- **AppDelegate**: Coordinates the components and handles application lifecycle
-
-## Notes
-
-- The app runs as an accessory (doesn't appear in the Dock)
-- The window appears on all spaces
-- Menu items are displayed but not interactive (for display purposes only)
+Open `Package.swift` in Xcode, then build and run the `NextMenus` app target.
