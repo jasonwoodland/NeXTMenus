@@ -54,6 +54,7 @@ class MenuWindowController: NSWindowController {
     private var promotedAppMenuItemsCache: (version: Int, items: [MenuItem])?
 
     private var promotedAppMenuItems: [MenuItem] {
+        guard NextMenusSettings.showServicesInMainMenu else { return [] }
         if let cache = promotedAppMenuItemsCache,
            cache.version == menuItemsVersion {
             return cache.items
@@ -63,6 +64,13 @@ class MenuWindowController: NSWindowController {
         let items = appItems.filter { !$0.isSeparator && $0.title == "Services" }
         promotedAppMenuItemsCache = (menuItemsVersion, items)
         return items
+    }
+
+    private var visibleTrailingActions: [TrailingAction] {
+        var actions: [TrailingAction] = []
+        if NextMenusSettings.showHideInMainMenu { actions.append(.hide) }
+        if NextMenusSettings.showQuitInMainMenu { actions.append(.quit) }
+        return actions
     }
 
     private var firstPromotedAppMenuItemRow: Int { 1 + visibleMenuItems.count }
@@ -84,9 +92,9 @@ class MenuWindowController: NSWindowController {
 
     private func trailingAction(at row: Int) -> TrailingAction? {
         let start = firstTrailingActionRow
-        let all = TrailingAction.allCases
-        guard row >= start, row < start + all.count else { return nil }
-        return all[row - start]
+        let actions = visibleTrailingActions
+        guard row >= start, row < start + actions.count else { return nil }
+        return actions[row - start]
     }
 
     // Track window movement completion
@@ -140,7 +148,9 @@ class MenuWindowController: NSWindowController {
 
         // Calculate window height based on number of items
         // Add 1 for the "Info" row (app menu)
-        let numberOfRows = menuItems.count + 1 + TrailingAction.allCases.count
+        let numberOfTrailingRows = (NextMenusSettings.showHideInMainMenu ? 1 : 0)
+            + (NextMenusSettings.showQuitInMainMenu ? 1 : 0)
+        let numberOfRows = menuItems.count + 1 + numberOfTrailingRows
         let contentHeight = CGFloat(numberOfRows) * rowHeight
         let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin - 1
 
@@ -208,8 +218,21 @@ class MenuWindowController: NSWindowController {
 
         // Set up modifier key monitoring
         setupModifierMonitor()
+        if let window = menuWindow as? NonActivatingWindow {
+            window.onRightMouseDown = { [weak self] event in
+                self?.showContextMenu(with: event)
+            }
+        }
+
         // Dismiss tracking when the user clicks anywhere outside our windows
         setupClickOutsideMonitor()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsDidChange(_:)),
+            name: NextMenusSettings.defaultsChangedNotification,
+            object: nil
+        )
     }
 
     private func setupDragMonitor() {
@@ -320,6 +343,13 @@ class MenuWindowController: NSWindowController {
         }
     }
 
+    @objc private func settingsDidChange(_ notification: Notification) {
+        invalidateVisibleMenuItemsCache()
+        collapseSubmenus()
+        tableView.reloadData()
+        resizeWindowToFitContent()
+    }
+
     private func setupTableView() {
         // Create scroll view with padding for title bar
         guard let contentView = menuWindow.contentView else { return }
@@ -392,11 +422,70 @@ class MenuWindowController: NSWindowController {
             self?.handleMouseExited()
         }
 
+        tableView.onRightMouseDown = { [weak self] event in
+            self?.showContextMenu(with: event)
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
         // Add scroll view to window
         contentView.addSubview(scrollView)
+    }
+
+    private func showContextMenu(with event: NSEvent) {
+        collapseSubmenus()
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Reset Position", action: #selector(resetPositionFromContextMenu(_:)), keyEquivalent: "").target = self
+
+        let insetItem = menu.addItem(withTitle: "Inset from Top Left", action: #selector(toggleTopLeftInset(_:)), keyEquivalent: "")
+        insetItem.target = self
+        insetItem.state = NextMenusSettings.useZeroTopLeftInset ? .off : .on
+
+        menu.addItem(.separator())
+
+        let servicesItem = menu.addItem(withTitle: "Show Services in Main Menu", action: #selector(toggleShowServices(_:)), keyEquivalent: "")
+        servicesItem.target = self
+        servicesItem.state = NextMenusSettings.showServicesInMainMenu ? .on : .off
+
+        let hideItem = menu.addItem(withTitle: "Show Hide in Main Menu", action: #selector(toggleShowHide(_:)), keyEquivalent: "")
+        hideItem.target = self
+        hideItem.state = NextMenusSettings.showHideInMainMenu ? .on : .off
+
+        let quitItem = menu.addItem(withTitle: "Show Quit in Main Menu", action: #selector(toggleShowQuit(_:)), keyEquivalent: "")
+        quitItem.target = self
+        quitItem.state = NextMenusSettings.showQuitInMainMenu ? .on : .off
+
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit NeXTMenus", action: #selector(quitNextMenus(_:)), keyEquivalent: "").target = self
+
+        NSMenu.popUpContextMenu(menu, with: event, for: tableView)
+    }
+
+    @objc private func resetPositionFromContextMenu(_ sender: NSMenuItem) {
+        resetPosition()
+    }
+
+    @objc private func toggleTopLeftInset(_ sender: NSMenuItem) {
+        NextMenusSettings.useZeroTopLeftInset.toggle()
+        resetPosition()
+    }
+
+    @objc private func toggleShowServices(_ sender: NSMenuItem) {
+        NextMenusSettings.showServicesInMainMenu.toggle()
+    }
+
+    @objc private func toggleShowHide(_ sender: NSMenuItem) {
+        NextMenusSettings.showHideInMainMenu.toggle()
+    }
+
+    @objc private func toggleShowQuit(_ sender: NSMenuItem) {
+        NextMenusSettings.showQuitInMainMenu.toggle()
+    }
+
+    @objc private func quitNextMenus(_ sender: NSMenuItem) {
+        NSApp.terminate(nil)
     }
 
     // MARK: - Mouse Event Handlers
@@ -585,7 +674,7 @@ class MenuWindowController: NSWindowController {
 
         // Position 8pt in from the top-left corner of the screen
         let windowHeight = menuWindow.frame.height
-        let inset: CGFloat = 8
+        let inset = NextMenusSettings.topLeftInset
 
         menuWindow.setFrameOrigin(NSPoint(
             x: screen.frame.origin.x + inset,
@@ -652,8 +741,8 @@ class MenuWindowController: NSWindowController {
 // MARK: - NSTableViewDataSource
 extension MenuWindowController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        // 1 for "Info" + the menu bar items + promoted app-menu items + trailing Hide/Quit actions
-        return 1 + visibleMenuItems.count + promotedAppMenuItems.count + TrailingAction.allCases.count
+        // 1 for "Info" + the menu bar items + promoted app-menu items + visible trailing actions
+        return 1 + visibleMenuItems.count + promotedAppMenuItems.count + visibleTrailingActions.count
     }
 }
 

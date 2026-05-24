@@ -4,6 +4,7 @@ import Cocoa
 /// when clicked or dragged. This allows the window to remain interactive
 /// (draggable) while keeping the original application as the frontmost app.
 class NonActivatingWindow: NSPanel {
+    var onRightMouseDown: ((NSEvent) -> Void)?
 
     override var canBecomeKey: Bool {
         return true
@@ -19,6 +20,10 @@ class NonActivatingWindow: NSPanel {
         return frameRect
     }
 
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightMouseDown?(event)
+    }
 
     override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
