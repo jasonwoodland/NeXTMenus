@@ -211,6 +211,15 @@ class SubmenuWindowController: NSWindowController {
 
             let mouseLocation = NSEvent.mouseLocation
 
+            if event.type == .leftMouseDragged,
+               self.isDragging,
+               let ownWindow = self.window,
+               !ownWindow.frame.contains(mouseLocation),
+               self.hoveredRow != nil {
+                self.hoveredRow = nil
+                self.updateAllRowHighlights()
+            }
+
             // Check if we have a child window open
             guard let childController = self.childSubmenuController,
                   let childWindow = childController.window,
@@ -231,6 +240,9 @@ class SubmenuWindowController: NSWindowController {
                 // doesn't also treat the release as outside itself and collapse
                 // the submenu before the child can flash/perform its action.
                 childController.handleMouseUpFromParent(at: childRow)
+                self.isDragging = false
+                self.hoveredRow = nil
+                self.updateAllRowHighlights()
                 return nil
             }
 
@@ -1218,18 +1230,30 @@ extension SubmenuWindowController: NSTableViewDelegate {
         defer {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
-        // Released off any menu item or outside the menu window - clear hover
-        // and collapse any open submenu.
+        // Released off any menu item or outside the menu window - cancel the
+        // whole attached tracking chain so later hover does not keep opening
+        // submenus without a fresh mouse-down. Torn-off menus stay visible.
         if row < 0 {
             hoveredRow = nil
-            if childSubmenuRow != nil {
-                closeSubmenu()
-            }
+            closeSubmenu()
             updateAllRowHighlights()
+            if isTornOff {
+                isDragging = false
+            } else {
+                dismissChain?()
+            }
             return
         }
         guard row < visibleMenuItems.count else { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+        if !(tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false) {
+            hoveredRow = nil
+            closeSubmenu()
+            updateAllRowHighlights()
+            if !isTornOff {
+                dismissChain?()
+            }
+            return
+        }
 
         let menuItem = visibleMenuItems[row]
         guard let element = menuItem.element else { return }

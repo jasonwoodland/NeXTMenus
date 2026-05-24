@@ -25,10 +25,24 @@ class MenuWindowController: NSWindowController {
 
     // Trailing actions appended after the menu bar items: Hide and Quit the
     // target app. Source of truth for row mapping and execution.
-    private enum TrailingAction: CaseIterable {
-        case hide, quit
-        var title: String { self == .hide ? "Hide" : "Quit" }
-        var shortcutGlyph: String { self == .hide ? "⌘H" : "⌘Q" }
+    private enum TrailingAction {
+        case hide, quit, logOut
+
+        var title: String {
+            switch self {
+            case .hide: return "Hide"
+            case .quit: return "Quit"
+            case .logOut: return "Log Out"
+            }
+        }
+
+        var shortcutGlyph: String {
+            switch self {
+            case .hide: return "⌘H"
+            case .quit: return "⌘Q"
+            case .logOut: return "⇧⌘Q"
+            }
+        }
     }
 
     // Override hover/selection on a specific row while it flashes after a
@@ -69,8 +83,14 @@ class MenuWindowController: NSWindowController {
     private var visibleTrailingActions: [TrailingAction] {
         var actions: [TrailingAction] = []
         if NextMenusSettings.showHideInMainMenu { actions.append(.hide) }
-        if NextMenusSettings.showQuitInMainMenu { actions.append(.quit) }
+        if NextMenusSettings.showQuitInMainMenu {
+            actions.append(isFinderTarget ? .logOut : .quit)
+        }
         return actions
+    }
+
+    private var isFinderTarget: Bool {
+        targetApp?.bundleIdentifier == "com.apple.finder"
     }
 
     private var firstPromotedAppMenuItemRow: Int { 1 + visibleMenuItems.count }
@@ -103,6 +123,7 @@ class MenuWindowController: NSWindowController {
     // State management for menu interactions
     private var hoveredRow: Int? // Currently highlighted row (visual only)
     private var isDragging: Bool = false // True while a click-drag is in progress
+    private var asyncSubmenuOpenGeneration = 0
 
     // Track local event monitor for cross-window drag
     private var localDragMonitor: Any?
@@ -241,6 +262,14 @@ class MenuWindowController: NSWindowController {
 
             let mouseLocation = NSEvent.mouseLocation
 
+            if event.type == .leftMouseDragged,
+               self.isDragging,
+               !self.menuWindow.frame.contains(mouseLocation),
+               self.hoveredRow != nil {
+                self.hoveredRow = nil
+                self.updateAllRowHighlights()
+            }
+
             // Check if we have a child window open
             guard let childController = self.childSubmenuController,
                   let childWindow = childController.window,
@@ -261,6 +290,9 @@ class MenuWindowController: NSWindowController {
                 // doesn't also treat the release as outside itself and collapse
                 // the submenu before the child can flash/perform its action.
                 childController.handleMouseUpFromParent(at: childRow)
+                self.isDragging = false
+                self.hoveredRow = nil
+                self.updateAllRowHighlights()
                 return nil
             }
 
@@ -574,9 +606,11 @@ class MenuWindowController: NSWindowController {
             hoveredRow = row
             updateAllRowHighlights()
         }
-        // Always (not only on row change), so a submenu re-opens if the
-        // click-drag's initial mouse-down toggled it closed.
-        updateOpenSubmenu(forHoveredRow: row)
+
+        // Keep drag-hover selection instant: extract/open the submenu away
+        // from the mouse-tracking call stack, then show it only if this row is
+        // still the active drag hover when extraction finishes.
+        openSubmenuFromDragAsync(forRow: row)
     }
 
     // Switches the open submenu to the hovered row. A row of -1 means the
@@ -698,9 +732,15 @@ class MenuWindowController: NSWindowController {
     // closing as a hover side-effect (e.g. hovering a trailing action while
     // a submenu is open) so subsequent hovers can still open submenus.
     func collapseSubmenus(endsTracking: Bool = true) {
+        asyncSubmenuOpenGeneration += 1
         childSubmenuController?.hideWindow()
         childSubmenuController = nil
         childSubmenuRow = nil
+        hoveredRow = nil
+        isDragging = false
+        pressedRow = nil
+        pressedRowWasOpen = false
+        childHasMouse = false
         if endsTracking { isMenuActive = false }
         updateAllRowHighlights()
     }
@@ -905,17 +945,24 @@ extension MenuWindowController: NSTableViewDelegate {
         } else {
             // Only enabled, non-separator rows can be highlighted
             let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
-            if trailingAction(at: row) != nil {
+            if isDragging {
+                // During click-drag over main-menu rows, only the hovered row
+                // is selected. Keep the open-submenu row grey only after the
+                // pointer has left main rows, e.g. while dragging in the child.
+                let pointerIsOffMainRows = (hoveredRow ?? -1) < 0
+                isHighlighted = hoverable
+                    && (hoveredRow == row || (pointerIsOffMainRows && childSubmenuRow == row))
+            } else if trailingAction(at: row) != nil {
                 // Trailing actions (Hide / Quit) don't highlight on plain
-                // hover - only when pressed, click-dragged onto, or while
-                // the menu is in click-open tracking mode.
+                // hover - only when pressed or while the menu is in
+                // click-open tracking mode.
                 isHighlighted = hoverable
                     && hoveredRow == row
-                    && (pressedRow == row || isDragging || isMenuActive)
+                    && (pressedRow == row || isMenuActive)
             } else {
                 isHighlighted = hoverable
                     && ((childSubmenuRow == row)
-                        || (hoveredRow == row && (childSubmenuRow != nil || isDragging)))
+                        || (hoveredRow == row && childSubmenuRow != nil))
             }
         }
 
@@ -926,8 +973,10 @@ extension MenuWindowController: NSTableViewDelegate {
         // The open-submenu row de-emphasizes (different material, not the blue
         // selection) while the pointer is down in the child submenu.
         if let effect = highlightView as? NSVisualEffectView {
-            let inChild = (childSubmenuRow == row) && childHasMouse
-            effect.isEmphasized = !inChild
+            let pointerIsOffMainRows = (hoveredRow ?? -1) < 0
+            let deEmphasizeOpenSubmenu = (childSubmenuRow == row)
+                && (childHasMouse || (isDragging && pointerIsOffMainRows))
+            effect.isEmphasized = !deEmphasizeOpenSubmenu
         }
         cellView.backgroundStyle = isHighlighted ? .emphasized : .normal
         // ShortcutView's text labels aren't covered by NSTableCellView's
@@ -962,6 +1011,11 @@ extension MenuWindowController: NSTableViewDelegate {
             }
             return
         }
+        if !(tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false) {
+            hoveredRow = nil
+            collapseSubmenus()
+            return
+        }
         // Toggle-close: a click (no drag) on a row that was already showing
         // its submenu at mousedown closes the chain on release - matches the
         // native menu bar behavior of mouseup, not mousedown, doing the work.
@@ -985,8 +1039,31 @@ extension MenuWindowController: NSTableViewDelegate {
                 self.targetApp?.hide()
             case .quit:
                 self.targetApp?.terminate()
+            case .logOut:
+                self.performLogOutShortcut()
             }
         }
+    }
+
+    private func performLogOutShortcut() {
+        // Finder doesn't expose this as a normal app-menu item; the row exists
+        // to mirror NeXT's menu. Send loginwindow the standard logout Apple
+        // event directly, which avoids relying on Finder/System Events menus.
+        let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.loginwindow")
+
+        let event = NSAppleEventDescriptor(
+            eventClass: fourCharCode("aevt"),
+            eventID: fourCharCode("logo"),
+            targetDescriptor: target,
+            returnID: AEReturnID(kAutoGenerateReturnID),
+            transactionID: AETransactionID(kAnyTransactionID)
+        )
+
+        _ = try? event.sendEvent(options: .defaultOptions, timeout: 5)
+    }
+
+    private func fourCharCode(_ string: String) -> FourCharCode {
+        string.utf8.reduce(0) { ($0 << 8) + FourCharCode($1) }
     }
 
     // Briefly blink a row's highlight then run completion (like a native menu).
@@ -1055,7 +1132,41 @@ extension MenuWindowController: NSTableViewDelegate {
 
         // Use the pre-extracted submenu tree (falls back to on-demand)
         let submenuItems = MenuExtractor.submenuItems(for: menuItem)
+        showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: element)
+    }
 
+    private func openSubmenuFromDragAsync(forRow row: Int) {
+        asyncSubmenuOpenGeneration += 1
+        let generation = asyncSubmenuOpenGeneration
+
+        guard row >= 0 else { return }
+
+        guard childSubmenuRow != row,
+              tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
+              let menuItem = mainMenuItem(at: row),
+              !menuItem.isSeparator,
+              menuItem.hasSubmenu else {
+            if let childSubmenuRow, childSubmenuRow != row {
+                collapseSubmenus(endsTracking: false)
+                hoveredRow = row
+                isDragging = true
+                updateAllRowHighlights()
+            }
+            return
+        }
+
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            let submenuItems = MenuExtractor.submenuItems(for: menuItem)
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                guard self.asyncSubmenuOpenGeneration == generation else { return }
+                guard self.isDragging, self.hoveredRow == row else { return }
+                self.showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: nil)
+            }
+        }
+    }
+
+    private func showSubmenu(for menuItem: MenuItem, at row: Int, submenuItems: [MenuItem], fallbackElement: AXUIElement?) {
         // Row 0 is the app menu, shown as "Info" - its submenu uses that title
         let displayTitle = (row == 0) ? "Info" : menuItem.title
 
@@ -1076,7 +1187,7 @@ extension MenuWindowController: NSTableViewDelegate {
             childSubmenuRow = row
             isMenuActive = true
             updateAllRowHighlights()
-        } else {
+        } else if let element = fallbackElement {
             // No submenu - this is an action item, execute it
             targetApp?.activate(options: [])
             usleep(50000) // 50ms - let activation complete
