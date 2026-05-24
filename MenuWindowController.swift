@@ -51,7 +51,36 @@ class MenuWindowController: NSWindowController {
     // (action performed, toggle-close, mouseup off the menu, etc.).
     private var isMenuActive: Bool = false
 
-    private var firstTrailingActionRow: Int { 1 + visibleMenuItems.count }
+    private var promotedAppMenuItemsCache: (version: Int, items: [MenuItem])?
+
+    private var promotedAppMenuItems: [MenuItem] {
+        if let cache = promotedAppMenuItemsCache,
+           cache.version == menuItemsVersion {
+            return cache.items
+        }
+
+        let appItems = appMenuItem.map { MenuExtractor.submenuItems(for: $0) } ?? []
+        let items = appItems.filter { !$0.isSeparator && $0.title == "Services" }
+        promotedAppMenuItemsCache = (menuItemsVersion, items)
+        return items
+    }
+
+    private var firstPromotedAppMenuItemRow: Int { 1 + visibleMenuItems.count }
+    private var firstTrailingActionRow: Int { firstPromotedAppMenuItemRow + promotedAppMenuItems.count }
+
+    private func promotedAppMenuItem(at row: Int) -> MenuItem? {
+        let start = firstPromotedAppMenuItemRow
+        let promoted = promotedAppMenuItems
+        guard row >= start, row < start + promoted.count else { return nil }
+        return promoted[row - start]
+    }
+
+    private func mainMenuItem(at row: Int) -> MenuItem? {
+        if row == 0 { return appMenuItem }
+        if let promoted = promotedAppMenuItem(at: row) { return promoted }
+        guard row > 0, row < firstPromotedAppMenuItemRow else { return nil }
+        return visibleMenuItems[row - 1]
+    }
 
     private func trailingAction(at row: Int) -> TrailingAction? {
         let start = firstTrailingActionRow
@@ -100,6 +129,7 @@ class MenuWindowController: NSWindowController {
 
     private func invalidateVisibleMenuItemsCache() {
         visibleMenuItemsCache = nil
+        promotedAppMenuItemsCache = nil
     }
 
     init(appName: String, appMenuItem: MenuItem?, menuItems: [MenuItem], targetApp: NSRunningApplication) {
@@ -436,14 +466,7 @@ class MenuWindowController: NSWindowController {
             return
         }
 
-        let menuItem: MenuItem?
-        if row == 0 {
-            menuItem = appMenuItem
-        } else {
-            menuItem = menuItems[row - 1]
-        }
-
-        guard let menuItem = menuItem, !menuItem.isSeparator else { return }
+        guard let menuItem = mainMenuItem(at: row), !menuItem.isSeparator else { return }
         showSubmenu(for: menuItem, at: row)
     }
 
@@ -498,13 +521,7 @@ class MenuWindowController: NSWindowController {
             collapseSubmenus()
             return
         }
-        let menuItem: MenuItem?
-        if row == 0 {
-            menuItem = appMenuItem
-        } else {
-            menuItem = visibleMenuItems[row - 1]
-        }
-        guard let menuItem = menuItem, !menuItem.isSeparator else { return }
+        guard let menuItem = mainMenuItem(at: row), !menuItem.isSeparator else { return }
         showSubmenu(for: menuItem, at: row)
     }
 
@@ -635,8 +652,8 @@ class MenuWindowController: NSWindowController {
 // MARK: - NSTableViewDataSource
 extension MenuWindowController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        // 1 for "Info" + the menu bar items + the trailing Hide/Quit actions
-        return 1 + visibleMenuItems.count + TrailingAction.allCases.count
+        // 1 for "Info" + the menu bar items + promoted app-menu items + trailing Hide/Quit actions
+        return 1 + visibleMenuItems.count + promotedAppMenuItems.count + TrailingAction.allCases.count
     }
 }
 
@@ -733,8 +750,7 @@ extension MenuWindowController: NSTableViewDelegate {
             cell?.textField?.isHidden = false
             chevronView?.isHidden = false
             chevronView?.contentTintColor = appMenuItem?.isEnabled ?? true ? .labelColor : .disabledControlTextColor
-        } else {
-            let menuItem = visibleMenuItems[row - 1]
+        } else if let menuItem = mainMenuItem(at: row) {
 
             // Handle separators
             if menuItem.isSeparator {
@@ -781,7 +797,7 @@ extension MenuWindowController: NSTableViewDelegate {
         if trailingAction(at: row) != nil {
             return true
         }
-        let menuItem = visibleMenuItems[row - 1]
+        guard let menuItem = mainMenuItem(at: row) else { return false }
         return menuItem.isEnabled && !menuItem.isSeparator
     }
 
@@ -917,14 +933,7 @@ extension MenuWindowController: NSTableViewDelegate {
         guard row >= 0 else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
-        let menuItem: MenuItem?
-        if row == 0 {
-            menuItem = appMenuItem
-        } else {
-            menuItem = menuItems[row - 1]
-        }
-
-        guard let menuItem = menuItem, let element = menuItem.element else { return }
+        guard let menuItem = mainMenuItem(at: row), let element = menuItem.element else { return }
 
         // Execute action
         targetApp?.activate(options: [])
@@ -940,15 +949,7 @@ extension MenuWindowController: NSTableViewDelegate {
         tableView.deselectRow(selectedRow)
 
         // Get the menu item
-        let menuItem: MenuItem?
-        if selectedRow == 0 {
-            // First row is "Info" (the app menu)
-            menuItem = appMenuItem
-        } else {
-            menuItem = menuItems[selectedRow - 1]
-        }
-
-        guard let menuItem = menuItem else { return }
+        guard let menuItem = mainMenuItem(at: selectedRow) else { return }
 
         // Show submenu at the right edge of the window
         showSubmenu(for: menuItem, at: selectedRow)
