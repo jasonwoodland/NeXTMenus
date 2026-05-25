@@ -1078,16 +1078,16 @@ extension MenuWindowController: NSTableViewDelegate {
         string.utf8.reduce(0) { ($0 << 8) + FourCharCode($1) }
     }
 
-    // Briefly blink a row's highlight then run completion (like a native menu).
+    // Briefly flash a row's highlight off then on before running completion.
     private func flashRow(_ row: Int, completion: @escaping () -> Void) {
         var step = 0
-        let totalSteps = 4
+        let totalSteps = 2
         flashState = (row, false)
         updateRowHighlight(forRow: row)
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
             step += 1
-            self.flashState = (row, step % 2 == 0)
+            self.flashState = (row, step % 2 != 0)
             self.updateRowHighlight(forRow: row)
             if step >= totalSteps {
                 timer.invalidate()

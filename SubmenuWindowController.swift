@@ -47,6 +47,7 @@ class SubmenuWindowController: NSWindowController {
     private var modifierMonitor: Any?
     private var menuItemsVersion = 0
     private var visibleMenuItemsCache: (state: MenuModifierState, version: Int, items: [MenuItem])?
+    private var checkableItemKeys = Set<String>()
 
     // Cached visible menu items based on current modifiers. Filtering is on
     // hot table/highlight paths, so keep it O(n) and recompute only when the
@@ -599,6 +600,12 @@ class SubmenuWindowController: NSWindowController {
         guard row >= 0 && row < visibleMenuItems.count else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
+        if isTornOff {
+            hoveredRow = row
+            isDragging = true
+            updateAllRowHighlights()
+        }
+
         // Open (or toggle) the submenu on press; leaf items act on mouse up
         if visibleMenuItems[row].hasSubmenu {
             handleMouseClickedRow(row)
@@ -782,6 +789,8 @@ class SubmenuWindowController: NSWindowController {
 
         self.title = title
         self.menuItems = menuItems
+        checkableItemKeys.removeAll()
+        rememberCheckableItems()
         menuItemsVersion += 1
         invalidateVisibleMenuItemsCache()
         self.parentMenuItem = parentMenuItem
@@ -858,18 +867,18 @@ class SubmenuWindowController: NSWindowController {
         return child
     }
 
-    // Briefly blink a row's highlight (like a native menu) then run completion.
-    // The blink drives the same updateRowHighlight() path as hover, so it uses
+    // Briefly flash a row's highlight off then on before running completion.
+    // The flash drives the same updateRowHighlight() path as hover, so it uses
     // the identical highlight color.
     private func flashRow(_ row: Int, completion: @escaping () -> Void) {
         var step = 0
-        let totalSteps = 4 // off, on, off, on
+        let totalSteps = 2 // off, on
         flashState = (row, false)
         updateRowHighlight(forRow: row)
         Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
             step += 1
-            self.flashState = (row, step % 2 == 0)
+            self.flashState = (row, step % 2 != 0)
             self.updateRowHighlight(forRow: row)
             if step >= totalSteps {
                 timer.invalidate()
@@ -880,21 +889,88 @@ class SubmenuWindowController: NSWindowController {
         }
     }
 
-    // Flash the clicked row, perform its action, then collapse the menu chain
-    // up to the main menu or the first torn-off window.
+    // Perform the clicked row's action. Attached menus flash first and then
+    // collapse; torn-off menus act immediately and stay open.
     private func performAction(_ element: AXUIElement, at row: Int) {
+        if isTornOff {
+            closeSubmenu()
+            rememberCheckableItems()
+            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            let didOptimisticallyToggle = optimisticallyToggleMarkIfNeeded(at: row)
+            if !didOptimisticallyToggle {
+                refreshTornOffMenuItemsAfterAction()
+            }
+            updateAllRowHighlights()
+            return
+        }
+
         flashRow(row) { [weak self] in
             guard let self = self else { return }
             self.targetApp?.activate(options: [])
             usleep(50000)
             AXUIElementPerformAction(element, kAXPressAction as CFString)
+            self.dismissChain?()
+        }
+    }
 
-            if self.isTornOff {
-                self.closeSubmenu()
-                self.updateAllRowHighlights()
-            } else {
-                self.dismissChain?()
+    private func rememberCheckableItems() {
+        for item in menuItems where item.markChar != nil {
+            checkableItemKeys.insert(checkableKey(for: item))
+        }
+    }
+
+    private func optimisticallyToggleMarkIfNeeded(at row: Int) -> Bool {
+        guard isTornOff, row >= 0, row < menuItems.count else { return false }
+        let key = checkableKey(for: menuItems[row])
+        guard menuItems[row].markChar != nil || checkableItemKeys.contains(key) else { return false }
+
+        if menuItems[row].markChar == nil {
+            menuItems[row].markChar = "✓"
+            checkableItemKeys.insert(key)
+        } else {
+            menuItems[row].markChar = nil
+        }
+        menuItemsVersion += 1
+        invalidateVisibleMenuItemsCache()
+        tableView.reloadData()
+        updateAllRowHighlights()
+        return true
+    }
+
+    private func checkableKey(for item: MenuItem) -> String {
+        "\(item.title)|\(item.cmdChar ?? "")|\(item.cmdModifiers ?? -1)"
+    }
+
+    private func refreshTornOffMenuItemsAfterAction() {
+        guard isTornOff else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self, self.isTornOff else { return }
+            var didChange = false
+
+            for index in self.menuItems.indices {
+                guard let element = self.menuItems[index].element else { continue }
+                let refreshedMark = self.markChar(for: element)
+                if self.menuItems[index].markChar != refreshedMark {
+                    self.menuItems[index].markChar = refreshedMark
+                    didChange = true
+                }
             }
+
+            guard didChange else { return }
+            self.menuItemsVersion += 1
+            self.invalidateVisibleMenuItemsCache()
+            self.tableView.reloadData()
+            self.updateAllRowHighlights()
+        }
+    }
+
+    private func markChar(for element: AXUIElement) -> String? {
+        var markValue: AnyObject?
+        AXUIElementCopyAttributeValue(element, kAXMenuItemMarkCharAttribute as CFString, &markValue)
+        return (markValue as? String).flatMap { str -> String? in
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
     }
 
@@ -1264,6 +1340,11 @@ extension SubmenuWindowController: NSTableViewDelegate {
                 updateAllRowHighlights()
             }
             return
+        }
+
+        if isTornOff {
+            hoveredRow = nil
+            updateAllRowHighlights()
         }
 
         // Leaf item - flash, perform the action, collapse the chain

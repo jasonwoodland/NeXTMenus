@@ -17,7 +17,7 @@ struct MenuItem {
 
     // AXMenuItem attributes
     let cmdGlyph: Int? // kAXMenuItemCmdGlyph - special-key glyph code for the shortcut
-    let markChar: String? // kAXMenuItemMarkChar - mark character (e.g. "✓" for checked items)
+    var markChar: String? // kAXMenuItemMarkChar - mark character (e.g. "✓" for checked items)
     let cmdChar: String? // kAXMenuItemCmdChar - raw shortcut character (used to detect alternates)
     let cmdModifiers: Int? // kAXMenuItemCmdModifiers - raw modifier mask (used to detect alternates)
 }
