@@ -394,32 +394,23 @@ class SubmenuWindowController: NSWindowController {
                 pow(currentFrame.origin.y - initialWindowFrame.origin.y, 2)
             )
 
-            // Only consider it torn off if moved more than 10 pixels
+            // Mark as torn off as soon as the drag crosses the threshold. If
+            // we wait until movement stops, the mouse-up on the titlebar can
+            // be handled as an off-row release and dismiss the attached chain
+            // before the window becomes detached.
             if distanceMoved > 10 {
-                // Cancel any existing timer
                 moveDetectionTimer?.invalidate()
-
-                // Set a timer to mark as torn off after movement stops
-                // This ensures we only mark as torn off for deliberate user drags
-                moveDetectionTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
-                    guard let self = self else { return }
-                    let currentFrame = self.submenuWindow.frame
-                    let distanceMoved = sqrt(
-                        pow(currentFrame.origin.x - self.initialWindowFrame.origin.x, 2) +
-                        pow(currentFrame.origin.y - self.initialWindowFrame.origin.y, 2)
-                    )
-
-                    if !self.isTornOff && distanceMoved > 10 {
-                        self.isTornOff = true
-                        // Show close button for torn off windows
-                        self.submenuWindow.standardWindowButton(.closeButton)?.isHidden = false
-                        // Hover no longer selects once torn off - clear any
-                        // stale highlight immediately
-                        self.updateAllRowHighlights()
-                        // Let the parent release this now-independent window
-                        self.onTornOff?()
-                    }
-                }
+                moveDetectionTimer = nil
+                isTornOff = true
+                // Show close button for torn off windows
+                submenuWindow.standardWindowButton(.closeButton)?.isHidden = false
+                // Hover no longer selects once torn off - clear any stale
+                // highlight immediately.
+                hoveredRow = nil
+                isDragging = false
+                updateAllRowHighlights()
+                // Let the parent release this now-independent window.
+                onTornOff?()
             }
         }
 
@@ -699,6 +690,11 @@ class SubmenuWindowController: NSWindowController {
         return tableView
     }
 
+    func containsScreenPointInChain(_ point: NSPoint) -> Bool {
+        if submenuWindow.frame.contains(point) { return true }
+        return childSubmenuController?.containsScreenPointInChain(point) ?? false
+    }
+
     // Helper to update all row highlights
     private func updateAllRowHighlights() {
         for i in 0..<tableView.numberOfRows {
@@ -836,6 +832,9 @@ class SubmenuWindowController: NSWindowController {
             self.detachedControllers.append(child)
             self.childSubmenuController = nil
             self.childSubmenuRow = nil
+            self.hoveredRow = nil
+            self.isDragging = false
+            self.childHasMouse = false
             self.updateAllRowHighlights()
         }
         child.dismissChain = { [weak self] in

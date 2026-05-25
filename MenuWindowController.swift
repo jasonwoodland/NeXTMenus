@@ -307,6 +307,11 @@ class MenuWindowController: NSWindowController {
         // definition outside our menu chain: collapse and exit tracking.
         clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self = self else { return }
+            let mouseLocation = NSEvent.mouseLocation
+            if self.menuWindow.frame.contains(mouseLocation)
+                || (self.childSubmenuController?.containsScreenPointInChain(mouseLocation) ?? false) {
+                return
+            }
             if self.isMenuActive || self.childSubmenuRow != nil {
                 self.collapseSubmenus()
             }
@@ -761,6 +766,13 @@ class MenuWindowController: NSWindowController {
             self.detachedControllers.append(child)
             self.childSubmenuController = nil
             self.childSubmenuRow = nil
+            self.hoveredRow = nil
+            self.isDragging = false
+            self.pressedRow = nil
+            self.pressedRowWasOpen = false
+            self.childHasMouse = false
+            self.isMenuActive = false
+            self.asyncSubmenuOpenGeneration += 1
             self.updateAllRowHighlights()
         }
         // An action performed deep in the chain collapses back to this window.
