@@ -74,6 +74,7 @@ class SubmenuWindowController: NSWindowController {
     // State management for menu interactions
     private var hoveredRow: Int? // Currently highlighted row (visual only)
     private var isDragging: Bool = false // True while a click-drag is in progress
+    private var suppressRowTrackingUntilMouseUp = false
 
     // While an action row is flashing, this overrides hover/submenu highlight
     // for that row so the blink can't be stomped by stray hover events.
@@ -207,8 +208,18 @@ class SubmenuWindowController: NSWindowController {
     }
 
     private func setupDragMonitor() {
-        localDragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+        localDragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
             guard let self = self else { return event }
+
+            if event.type == .leftMouseDown,
+               self.shouldSuppressRowTrackingForWindowDragStart(event) {
+                self.suppressRowTrackingUntilMouseUp = true
+                self.hoveredRow = nil
+                self.isDragging = false
+                self.updateAllRowHighlights()
+            } else if event.type == .leftMouseUp {
+                self.suppressRowTrackingUntilMouseUp = false
+            }
 
             let mouseLocation = NSEvent.mouseLocation
 
@@ -249,6 +260,18 @@ class SubmenuWindowController: NSWindowController {
 
             return event
         }
+    }
+
+    private func shouldSuppressRowTrackingForWindowDragStart(_ event: NSEvent) -> Bool {
+        guard event.window === submenuWindow else { return false }
+
+        // If the press starts outside an actual table row (titlebar, bottom
+        // padding, or other draggable background), any later row under the
+        // pointer is caused by the window moving with the mouse, not by a
+        // deliberate menu click-drag.
+        let tablePoint = tableView.convert(event.locationInWindow, from: nil)
+        let row = tableView.row(at: tablePoint)
+        return row < 0
     }
 
     private func setupGlobalClickMonitor() {
@@ -387,6 +410,16 @@ class SubmenuWindowController: NSWindowController {
             return
         }
 
+        // Any user-driven window movement is a window drag, not a menu
+        // click-drag. Suppress row tracking immediately so rows under the
+        // pointer don't briefly highlight before the tear-off threshold.
+        suppressRowTrackingUntilMouseUp = true
+        if hoveredRow != nil || isDragging {
+            hoveredRow = nil
+            isDragging = false
+            updateAllRowHighlights()
+        }
+
         // Only mark as torn off if the window has actually moved from its initial position
         if !isTornOff {
             let currentFrame = submenuWindow.frame
@@ -409,6 +442,7 @@ class SubmenuWindowController: NSWindowController {
                 // highlight immediately.
                 hoveredRow = nil
                 isDragging = false
+                suppressRowTrackingUntilMouseUp = true
                 updateAllRowHighlights()
                 // Let the parent release this now-independent window.
                 onTornOff?()
@@ -541,6 +575,7 @@ class SubmenuWindowController: NSWindowController {
 
     // Handle mouse hover (no button pressed) - visual highlight only
     private func handleMouseMoved(_ row: Int) {
+        guard !suppressRowTrackingUntilMouseUp else { return }
         pointerEnteredSelf()
         let rowChanged = hoveredRow != row
         if rowChanged || isDragging {
@@ -592,6 +627,8 @@ class SubmenuWindowController: NSWindowController {
 
     // Handle mouse down - open the submenu immediately for items that have one
     private func handleMouseDown(_ row: Int) {
+        guard !suppressRowTrackingUntilMouseUp else { return }
+
         // A click raises this window above its open submenu; re-assert the
         // chain on top afterwards so the submenu stays focused/visible.
         defer {
@@ -628,6 +665,8 @@ class SubmenuWindowController: NSWindowController {
 
     // Handle mouse drag (button held) - open menus while dragging
     private func handleMouseDragged(_ row: Int) {
+        guard !suppressRowTrackingUntilMouseUp else { return }
+
         // Only count the pointer as "in this window" when it's over a row;
         // during a drag this still fires (mouse capture) when the pointer has
         // moved into a child submenu, where row is -1.

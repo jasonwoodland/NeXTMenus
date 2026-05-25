@@ -62,6 +62,13 @@ class HoverTableView: NSTableView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        guard mouseDownRow >= 0 else {
+            mouseDownRow = -1
+            mouseDownTimestamp = nil
+            hasDraggedToNewRow = false
+            return
+        }
+
         // Check if this was a long press (>500ms) - but only if the mouse
         // never moved to a different row. A slow click-drag also exceeds
         // 500ms and must not be treated as a long press.
@@ -87,6 +94,8 @@ class HoverTableView: NSTableView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard mouseDownRow >= 0 else { return }
+
         let locationInView = self.convert(event.locationInWindow, from: nil)
         let row = self.row(at: locationInView)
 
