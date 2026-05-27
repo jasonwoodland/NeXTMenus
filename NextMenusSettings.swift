@@ -7,6 +7,7 @@ struct NextMenusSettings {
         static let showServicesInMainMenu = "showServicesInMainMenu"
         static let showHideInMainMenu = "showHideInMainMenu"
         static let showQuitInMainMenu = "showQuitInMainMenu"
+        static let enableHiding = "enableHiding"
     }
 
     static let defaultsChangedNotification = Notification.Name("NextMenusSettingsDefaultsChanged")
@@ -33,6 +34,11 @@ struct NextMenusSettings {
     static var showQuitInMainMenu: Bool {
         get { bool(forKey: Key.showQuitInMainMenu, defaultValue: true) }
         set { set(newValue, forKey: Key.showQuitInMainMenu) }
+    }
+
+    static var enableHiding: Bool {
+        get { bool(forKey: Key.enableHiding, defaultValue: false) }
+        set { set(newValue, forKey: Key.enableHiding) }
     }
 
     private static func bool(forKey key: String, defaultValue: Bool) -> Bool {

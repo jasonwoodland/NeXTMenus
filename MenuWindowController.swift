@@ -66,6 +66,14 @@ class MenuWindowController: NSWindowController {
     // (action performed, toggle-close, mouseup off the menu, etc.).
     private var isMenuActive: Bool = false
 
+    // Dock-like auto-hide state for the main menu window.
+    private var hideHoverMonitor: Any?
+    private var localHideHoverMonitor: Any?
+    private var isHoverHidden: Bool = false
+    private var normalVisibleOrigin: NSPoint?
+    private let hoverHideAnimationDuration: TimeInterval = 0.16
+    private let hoverHideShadowClearance: CGFloat = 32
+
     private var promotedAppMenuItemsCache: (version: Int, items: [MenuItem])?
 
     private var promotedAppMenuItems: [MenuItem] {
@@ -254,6 +262,7 @@ class MenuWindowController: NSWindowController {
             if localDragMonitor == nil { setupDragMonitor() }
             if clickOutsideMonitor == nil { setupClickOutsideMonitor() }
             if modifierMonitor == nil { setupModifierMonitor() }
+            if NextMenusSettings.enableHiding, hideHoverMonitor == nil || localHideHoverMonitor == nil { setupHideHoverMonitor() }
         } else {
             if let monitor = localDragMonitor {
                 NSEvent.removeMonitor(monitor)
@@ -266,6 +275,28 @@ class MenuWindowController: NSWindowController {
             if let monitor = modifierMonitor {
                 NSEvent.removeMonitor(monitor)
                 modifierMonitor = nil
+            }
+            if let monitor = hideHoverMonitor {
+                NSEvent.removeMonitor(monitor)
+                hideHoverMonitor = nil
+            }
+            if let monitor = localHideHoverMonitor {
+                NSEvent.removeMonitor(monitor)
+                localHideHoverMonitor = nil
+            }
+        }
+    }
+
+    private func setupHideHoverMonitor() {
+        if hideHoverMonitor == nil {
+            hideHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] _ in
+                DispatchQueue.main.async { self?.updateHoverHiding(for: NSEvent.mouseLocation) }
+            }
+        }
+        if localHideHoverMonitor == nil {
+            localHideHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged, .rightMouseDragged]) { [weak self] event in
+                self?.updateHoverHiding(for: NSEvent.mouseLocation)
+                return event
             }
         }
     }
@@ -370,6 +401,12 @@ class MenuWindowController: NSWindowController {
         if let monitor = clickOutsideMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        if let monitor = hideHoverMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        if let monitor = localHideHoverMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -395,6 +432,9 @@ class MenuWindowController: NSWindowController {
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
+        if !NextMenusSettings.enableHiding {
+            disableHoverHiding()
+        }
         invalidateVisibleMenuItemsCache()
         collapseSubmenus()
         tableView.reloadData()
@@ -494,6 +534,10 @@ class MenuWindowController: NSWindowController {
         insetItem.target = self
         insetItem.state = NextMenusSettings.useZeroTopLeftInset ? .off : .on
 
+        let hidingItem = menu.addItem(withTitle: "Enable Hiding", action: #selector(toggleEnableHiding(_:)), keyEquivalent: "")
+        hidingItem.target = self
+        hidingItem.state = NextMenusSettings.enableHiding ? .on : .off
+
         menu.addItem(.separator())
 
         let servicesItem = menu.addItem(withTitle: "Show Services in Main Menu", action: #selector(toggleShowServices(_:)), keyEquivalent: "")
@@ -531,6 +575,17 @@ class MenuWindowController: NSWindowController {
 
     @objc private func toggleShowServices(_ sender: NSMenuItem) {
         NextMenusSettings.showServicesInMainMenu.toggle()
+    }
+
+    @objc private func toggleEnableHiding(_ sender: NSMenuItem) {
+        NextMenusSettings.enableHiding.toggle()
+        if NextMenusSettings.enableHiding {
+            normalVisibleOrigin = visibleOriginForCurrentScreen()
+            showWindow()
+            hideForHover()
+        } else {
+            disableHoverHiding()
+        }
     }
 
     @objc private func toggleShowHide(_ sender: NSMenuItem) {
@@ -704,6 +759,10 @@ class MenuWindowController: NSWindowController {
 
     func showWindow() {
         setInteractionMonitoringEnabled(true)
+        if NextMenusSettings.enableHiding {
+            normalVisibleOrigin = normalVisibleOrigin ?? visibleOriginForCurrentScreen()
+            if isHoverHidden { hideForHover() }
+        }
         menuWindow.orderFrontRegardless()
     }
 
@@ -749,15 +808,115 @@ class MenuWindowController: NSWindowController {
             return
         }
 
-        // Position 8pt in from the top-left corner of the screen
+        let origin = visibleOrigin(on: screen)
+        normalVisibleOrigin = origin
+        isHoverHidden = false
+        menuWindow.setFrameOrigin(origin)
+
+        if NextMenusSettings.enableHiding {
+            hideForHover(animated: false)
+        }
+    }
+
+    private func visibleOriginForCurrentScreen() -> NSPoint? {
+        let mouseLocation = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main else {
+            return nil
+        }
+        return visibleOrigin(on: screen)
+    }
+
+    private func visibleOrigin(on screen: NSScreen) -> NSPoint {
         let windowHeight = menuWindow.frame.height
         let inset = NextMenusSettings.topLeftInset
-
-        menuWindow.setFrameOrigin(NSPoint(
+        return NSPoint(
             x: screen.frame.origin.x + inset,
             y: screen.frame.maxY - windowHeight - inset
-        ))
+        )
+    }
 
+    private func disableHoverHiding() {
+        if let monitor = hideHoverMonitor {
+            NSEvent.removeMonitor(monitor)
+            hideHoverMonitor = nil
+        }
+        if let monitor = localHideHoverMonitor {
+            NSEvent.removeMonitor(monitor)
+            localHideHoverMonitor = nil
+        }
+        isHoverHidden = false
+        if let origin = normalVisibleOrigin ?? visibleOriginForCurrentScreen() {
+            menuWindow.setFrameOrigin(origin)
+        }
+    }
+
+    private func hideForHover(animated: Bool = true) {
+        guard NextMenusSettings.enableHiding else { return }
+        let visibleOrigin = normalVisibleOrigin ?? menuWindow.frame.origin
+        normalVisibleOrigin = visibleOrigin
+        let screenLeftEdge = visibleOrigin.x - NextMenusSettings.topLeftInset
+        let hiddenOrigin = NSPoint(x: screenLeftEdge - menuWindow.frame.width - hoverHideShadowClearance, y: visibleOrigin.y)
+        setHoverFrameOrigin(hiddenOrigin, animated: animated)
+        isHoverHidden = true
+    }
+
+    private func showForHover(animated: Bool = true) {
+        guard let origin = normalVisibleOrigin ?? visibleOriginForCurrentScreen() else { return }
+        normalVisibleOrigin = origin
+        setHoverFrameOrigin(origin, animated: animated)
+        isHoverHidden = false
+    }
+
+    private func setHoverFrameOrigin(_ origin: NSPoint, animated: Bool) {
+        guard animated else {
+            menuWindow.setFrameOrigin(origin)
+            return
+        }
+
+        var frame = menuWindow.frame
+        frame.origin = origin
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = hoverHideAnimationDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            menuWindow.animator().setFrame(frame, display: true)
+        }
+    }
+
+    private var shouldDeferHoverHide: Bool {
+        pressedRow != nil || isDragging || isMenuActive || childSubmenuRow != nil
+    }
+
+    private func updateHoverHiding(for mouseLocation: NSPoint) {
+        guard NextMenusSettings.enableHiding, menuWindow.isVisible else { return }
+        let frame = menuWindow.frame
+
+        if isHoverHidden {
+            guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main else { return }
+            let visibleFrame = NSRect(
+                origin: normalVisibleOrigin ?? visibleOrigin(on: screen),
+                size: frame.size
+            )
+            if mouseLocation.x <= screen.frame.minX + 1,
+               mouseLocation.y >= visibleFrame.minY,
+               mouseLocation.y <= visibleFrame.maxY {
+                showForHover()
+            }
+            return
+        }
+
+        guard !shouldDeferHoverHide else { return }
+        if mouseLocation.x > frame.maxX || mouseLocation.y < frame.minY {
+            // Do not immediately re-hide while the pointer is still on the
+            // left-edge reveal strip; this prevents edge jitter/flicker.
+            if let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main,
+               mouseLocation.x <= screen.frame.minX + 1,
+               mouseLocation.y >= frame.minY,
+               mouseLocation.y <= frame.maxY {
+                return
+            }
+            collapseSubmenus()
+            hideForHover()
+        }
     }
 
     func hideWindow() {
@@ -789,6 +948,13 @@ class MenuWindowController: NSWindowController {
         updateAllRowHighlights()
     }
 
+    private func dismissAfterAction() {
+        collapseSubmenus()
+        if NextMenusSettings.enableHiding {
+            hideForHover()
+        }
+    }
+
     // Creates a child submenu controller and wires up its callbacks.
     private func makeChildController(title: String, menuItems: [MenuItem],
                                      parentMenuItem: MenuItem?) -> SubmenuWindowController {
@@ -814,9 +980,9 @@ class MenuWindowController: NSWindowController {
             self.asyncSubmenuOpenGeneration += 1
             self.updateAllRowHighlights()
         }
-        // An action performed deep in the chain collapses back to this window.
+        // An action performed deep in the attached chain dismisses/hides the main menu.
         child.dismissChain = { [weak self] in
-            self?.collapseSubmenus()
+            self?.dismissAfterAction()
         }
         child.onPointerEntered = { [weak self] in
             guard let self = self else { return }
@@ -1156,6 +1322,7 @@ extension MenuWindowController: NSTableViewDelegate {
         targetApp?.activate(options: [])
         usleep(50000)
         AXUIElementPerformAction(element, kAXPressAction as CFString)
+        dismissAfterAction()
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -1243,7 +1410,7 @@ extension MenuWindowController: NSTableViewDelegate {
             targetApp?.activate(options: [])
             usleep(50000) // 50ms - let activation complete
             AXUIElementPerformAction(element, kAXPressAction as CFString)
-            collapseSubmenus()
+            dismissAfterAction()
         }
     }
 }
