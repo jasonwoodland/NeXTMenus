@@ -1,4 +1,5 @@
 import Cocoa
+import ServiceManagement
 
 class MenuWindowController: NSWindowController {
     private var menuWindow: NSWindow!
@@ -495,6 +496,12 @@ class MenuWindowController: NSWindowController {
         quitItem.state = NextMenusSettings.showQuitInMainMenu ? .on : .off
 
         menu.addItem(.separator())
+
+        let openAtLoginItem = menu.addItem(withTitle: "Open at Login", action: #selector(toggleOpenAtLogin(_:)), keyEquivalent: "")
+        openAtLoginItem.target = self
+        openAtLoginItem.state = isOpenAtLoginEnabled ? .on : .off
+
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit NeXTMenus", action: #selector(quitNextMenus(_:)), keyEquivalent: "").target = self
 
         NSMenu.popUpContextMenu(menu, with: event, for: tableView)
@@ -519,6 +526,23 @@ class MenuWindowController: NSWindowController {
 
     @objc private func toggleShowQuit(_ sender: NSMenuItem) {
         NextMenusSettings.showQuitInMainMenu.toggle()
+    }
+
+    private var isOpenAtLoginEnabled: Bool {
+        SMAppService.mainApp.status == .enabled
+    }
+
+    @objc private func toggleOpenAtLogin(_ sender: NSMenuItem) {
+        do {
+            if isOpenAtLoginEnabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            NSSound.beep()
+            NSLog("Failed to update Open at Login: \(error.localizedDescription)")
+        }
     }
 
     @objc private func quitNextMenus(_ sender: NSMenuItem) {
