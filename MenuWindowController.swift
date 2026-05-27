@@ -235,19 +235,11 @@ class MenuWindowController: NSWindowController {
             object: menuWindow
         )
 
-        // Set up local event monitor for mouse drags to handle cross-window hovering
-        setupDragMonitor()
-
-        // Set up modifier key monitoring
-        setupModifierMonitor()
         if let window = menuWindow as? NonActivatingWindow {
             window.onRightMouseDown = { [weak self] event in
                 self?.showContextMenu(with: event)
             }
         }
-
-        // Dismiss tracking when the user clicks anywhere outside our windows
-        setupClickOutsideMonitor()
 
         NotificationCenter.default.addObserver(
             self,
@@ -255,6 +247,27 @@ class MenuWindowController: NSWindowController {
             name: NextMenusSettings.defaultsChangedNotification,
             object: nil
         )
+    }
+
+    private func setInteractionMonitoringEnabled(_ enabled: Bool) {
+        if enabled {
+            if localDragMonitor == nil { setupDragMonitor() }
+            if clickOutsideMonitor == nil { setupClickOutsideMonitor() }
+            if modifierMonitor == nil { setupModifierMonitor() }
+        } else {
+            if let monitor = localDragMonitor {
+                NSEvent.removeMonitor(monitor)
+                localDragMonitor = nil
+            }
+            if let monitor = clickOutsideMonitor {
+                NSEvent.removeMonitor(monitor)
+                clickOutsideMonitor = nil
+            }
+            if let monitor = modifierMonitor {
+                NSEvent.removeMonitor(monitor)
+                modifierMonitor = nil
+            }
+        }
     }
 
     private func setupDragMonitor() {
@@ -690,6 +703,7 @@ class MenuWindowController: NSWindowController {
     }
 
     func showWindow() {
+        setInteractionMonitoringEnabled(true)
         menuWindow.orderFrontRegardless()
     }
 
@@ -754,6 +768,7 @@ class MenuWindowController: NSWindowController {
         hoveredRow = nil
 
         menuWindow.orderOut(nil)
+        setInteractionMonitoringEnabled(false)
     }
 
     // Collapses the whole submenu chain back to this main menu window.

@@ -4,6 +4,7 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate {
     var menuWindowControllers: [pid_t: MenuWindowController] = [:]
     var applicationObserver: ApplicationObserver?
+    private var visibleMenuPid: pid_t?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide the app from the Dock
@@ -26,6 +27,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(activeSpaceChanged),
             name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
 
+        // Drop cached windows for apps that have quit. Otherwise the cache
+        // grows for the whole NeXTMenus session, making every app switch walk
+        // and hide an ever-larger set of stale controllers.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(applicationTerminated(_:)),
+            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+
         // Handle initial active application
         if let activeApp = NSWorkspace.shared.frontmostApplication {
             handleActiveApplicationChange(activeApp)
@@ -40,6 +48,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             controller.showWindow()
         }
+    }
+
+    @objc private func applicationTerminated(_ notification: Notification) {
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        if let controller = menuWindowControllers.removeValue(forKey: app.processIdentifier) {
+            controller.hideWindow()
+        }
+        if visibleMenuPid == app.processIdentifier {
+            visibleMenuPid = nil
+        }
+    }
+
+    deinit {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -93,19 +115,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Hide all other windows
-        for (otherPid, controller) in menuWindowControllers {
-            if otherPid != pid {
-                controller.hideWindow()
-            }
+        // Hide only the previously visible menu. Walking every cached app on
+        // each activation makes switching slower as the cache grows.
+        if let visibleMenuPid, visibleMenuPid != pid,
+           let previousController = menuWindowControllers[visibleMenuPid] {
+            previousController.hideWindow()
         }
 
         // Skip showing our menu when the target app is in fullscreen -
         // its own menu bar is hidden, so ours should be too.
         if MenuExtractor.isFullscreen(app) {
             menuWindowController.hideWindow()
+            visibleMenuPid = nil
         } else {
             menuWindowController.showWindow()
+            visibleMenuPid = pid
         }
     }
 
