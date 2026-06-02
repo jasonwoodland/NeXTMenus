@@ -799,12 +799,8 @@ class MenuWindowController: NSWindowController {
         tableView.frame.size.height = contentH
     }
 
-    func resetPosition() {
-        // Get the screen containing the mouse pointer (current screen)
-        let mouseLocation = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
-
-        guard let screen = screen else {
+    func resetPosition(on targetScreen: NSScreen? = nil) {
+        guard let screen = targetScreen ?? screenContainingMouse() ?? NSScreen.main else {
             return
         }
 
@@ -819,11 +815,15 @@ class MenuWindowController: NSWindowController {
     }
 
     private func visibleOriginForCurrentScreen() -> NSPoint? {
-        let mouseLocation = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main else {
+        guard let screen = screenContainingMouse() ?? NSScreen.main else {
             return nil
         }
         return visibleOrigin(on: screen)
+    }
+
+    private func screenContainingMouse() -> NSScreen? {
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) })
     }
 
     private func visibleOrigin(on screen: NSScreen) -> NSPoint {

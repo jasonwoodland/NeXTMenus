@@ -23,16 +23,43 @@ struct MenuItem {
 }
 
 class MenuExtractor {
-    /// Whether an app's focused window is in native fullscreen. We use this
-    /// to hide our menu, since the system menu bar is also hidden in that
-    /// state. The "AXFullScreen" attribute is undocumented but widely used.
-    static func isFullscreen(_ app: NSRunningApplication) -> Bool {
+    private static func focusedWindow(for app: NSRunningApplication) -> AXUIElement? {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var focusedWindowRef: AnyObject?
         let result = AXUIElementCopyAttributeValue(
             appElement, kAXFocusedWindowAttribute as CFString, &focusedWindowRef)
-        guard result == .success, let focused = focusedWindowRef else { return false }
-        let window = focused as! AXUIElement
+        guard result == .success, let focused = focusedWindowRef else { return nil }
+        return (focused as! AXUIElement)
+    }
+
+    static func focusedWindowFrame(for app: NSRunningApplication) -> NSRect? {
+        guard let window = focusedWindow(for: app) else { return nil }
+
+        var positionRef: AnyObject?
+        let positionResult = AXUIElementCopyAttributeValue(
+            window, kAXPositionAttribute as CFString, &positionRef)
+        guard positionResult == .success, let positionValue = positionRef else { return nil }
+
+        var sizeRef: AnyObject?
+        let sizeResult = AXUIElementCopyAttributeValue(
+            window, kAXSizeAttribute as CFString, &sizeRef)
+        guard sizeResult == .success, let sizeValue = sizeRef else { return nil }
+
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else {
+            return nil
+        }
+
+        return NSRect(origin: position, size: size)
+    }
+
+    /// Whether an app's focused window is in native fullscreen. We use this
+    /// to hide our menu, since the system menu bar is also hidden in that
+    /// state. The "AXFullScreen" attribute is undocumented but widely used.
+    static func isFullscreen(_ app: NSRunningApplication) -> Bool {
+        guard let window = focusedWindow(for: app) else { return false }
         var fullscreenRef: AnyObject?
         let r2 = AXUIElementCopyAttributeValue(
             window, "AXFullScreen" as CFString, &fullscreenRef)

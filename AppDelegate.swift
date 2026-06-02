@@ -36,6 +36,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Handle initial active application
         if let activeApp = NSWorkspace.shared.frontmostApplication {
+            applicationObserver?.observeFocusedWindowChanges(for: activeApp)
             handleActiveApplicationChange(activeApp)
         }
     }
@@ -46,6 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if MenuExtractor.isFullscreen(app) {
             controller.hideWindow()
         } else {
+            controller.resetPosition(on: screenForFocusedWindow(of: app))
             controller.showWindow()
         }
     }
@@ -102,7 +104,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 targetApp: app
             )
             menuWindowControllers[pid] = menuWindowController
-            menuWindowController.resetPosition()
 
             // Submenus are extracted lazily when opened. Eager recursive
             // extraction presses every submenu in the target app and can spike
@@ -128,9 +129,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menuWindowController.hideWindow()
             visibleMenuPid = nil
         } else {
+            menuWindowController.resetPosition(on: screenForFocusedWindow(of: app))
             menuWindowController.showWindow()
             visibleMenuPid = pid
         }
+    }
+
+    private func screenForFocusedWindow(of app: NSRunningApplication) -> NSScreen? {
+        guard let windowFrame = MenuExtractor.focusedWindowFrame(for: app) else { return nil }
+
+        if let screen = NSScreen.screens.max(by: { lhs, rhs in
+            lhs.frame.intersection(windowFrame).area < rhs.frame.intersection(windowFrame).area
+        }), !screen.frame.intersection(windowFrame).isEmpty {
+            return screen
+        }
+
+        let windowCenter = NSPoint(x: windowFrame.midX, y: windowFrame.midY)
+        return NSScreen.screens.first(where: { $0.frame.contains(windowCenter) })
     }
 
     // Re-reads an app's menu bar until it's populated. The accessibility menu
@@ -149,5 +164,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 controller.applyFullMenu(appMenuItem: appMenuItem, menuItems: menuItems)
             }
         }
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat {
+        guard !isEmpty else { return 0 }
+        return width * height
     }
 }
