@@ -8,6 +8,7 @@ class HoverTableView: NSTableView {
     var onMouseLongPressReleased: ((Int) -> Void)?
     var onMouseExited: (() -> Void)?  // Mouse left the table entirely
     var onRightMouseDown: ((NSEvent) -> Void)?
+    var onScrollWheel: ((NSEvent) -> Bool)?
 
     private var mouseDownRow: Int = -1
     private var mouseDownTimestamp: Date?
@@ -110,6 +111,13 @@ class HoverTableView: NSTableView {
 
     override func rightMouseDown(with event: NSEvent) {
         onRightMouseDown?(event)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        if onScrollWheel?(event) == true {
+            return
+        }
+        super.scrollWheel(with: event)
     }
 
     // Get row at a global screen point (for cross-window hover detection)

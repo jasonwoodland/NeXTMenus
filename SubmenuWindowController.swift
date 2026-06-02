@@ -1,8 +1,94 @@
 import Cocoa
 
+private final class SubmenuScrollCaretView: NSView {
+    private let onHoverChanged: (Bool) -> Void
+    private var trackingArea: NSTrackingArea?
+    private(set) var isHovered = false
+
+    init(symbolName: String, onHoverChanged: @escaping (Bool) -> Void) {
+        self.onHoverChanged = onHoverChanged
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        layer?.backgroundColor = NextMenusRendering.useGlassEffects
+            ? NSColor.clear.cgColor
+            : NextMenusRendering.windowBackgroundColor.cgColor
+
+        if NextMenusRendering.useGlassEffects {
+            let backgroundView = NSVisualEffectView(frame: .zero)
+            backgroundView.material = .menu
+            backgroundView.blendingMode = .behindWindow
+            backgroundView.state = .active
+            backgroundView.autoresizingMask = [.width, .height]
+            addSubview(backgroundView)
+        }
+
+        let imageView = NSImageView(frame: .zero)
+        imageView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        imageView.imageScaling = .scaleNone
+        imageView.imageAlignment = .alignCenter
+        imageView.contentTintColor = .tertiaryLabelColor
+        imageView.autoresizingMask = [.width, .height]
+        addSubview(imageView)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        for subview in subviews {
+            subview.frame = bounds
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        trackingArea = area
+        addTrackingArea(area)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        isHidden || !bounds.contains(point) ? nil : self
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !isHovered else { return }
+        isHovered = true
+        onHoverChanged(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        cancelHover()
+    }
+
+    func cancelHover() {
+        guard isHovered else { return }
+        isHovered = false
+        onHoverChanged(false)
+    }
+}
+
 class SubmenuWindowController: NSWindowController {
     private var submenuWindow: NSWindow!
     private var tableView: HoverTableView!
+    private var scrollView: NSScrollView!
+    private var scrollClipBoundsObserver: NSObjectProtocol?
+    private var scrollUpCaretView: SubmenuScrollCaretView!
+    private var scrollDownCaretView: SubmenuScrollCaretView!
+    private var scrollTimer: Timer?
+    private var scrollWheelRemainder: CGFloat = 0
     private var menuItems: [MenuItem] = []
     private var title: String = ""
     private var targetApp: NSRunningApplication?
@@ -10,6 +96,8 @@ class SubmenuWindowController: NSWindowController {
     private let rowHeight: CGFloat = 24
     private let separatorRowHeight: CGFloat = 12
     private let titleBarHeight: CGFloat = 28
+    private let caretRowHeight: CGFloat = 24
+    private let scrollRepeatInterval: TimeInterval = 0.05
     // Small breathing room below the last row so it isn't flush with the edge
     private static let bottomMargin: CGFloat = 8
 
@@ -400,6 +488,10 @@ class SubmenuWindowController: NSWindowController {
         if let monitor = modifierMonitor {
             NSEvent.removeMonitor(monitor)
         }
+        scrollTimer?.invalidate()
+        if let observer = scrollClipBoundsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         NotificationCenter.default.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
@@ -468,6 +560,8 @@ class SubmenuWindowController: NSWindowController {
         // Only reposition if not torn off
         guard !isTornOff else { return }
 
+        resizeWindowToFitContent(relativeTo: parentWindow)
+
         let parentFrame = parentWindow.frame
         let xPos = parentFrame.maxX - 6  // shift 6pt left to overlap parent
         // Align tops: parent's top (maxY) minus child's height gives child's bottom (origin.y)
@@ -507,8 +601,9 @@ class SubmenuWindowController: NSWindowController {
         )
 
         let scrollView = NSScrollView(frame: scrollViewFrame)
+        self.scrollView = scrollView
         scrollView.autoresizingMask = [.width, .height]
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
@@ -564,11 +659,258 @@ class SubmenuWindowController: NSWindowController {
             self?.handleMouseExited()
         }
 
+        tableView.onScrollWheel = { [weak self] event in
+            self?.handleScrollWheel(event) ?? false
+        }
+
         // Add table view to scroll view
         scrollView.documentView = tableView
 
         // Add scroll view to window
         contentView.addSubview(scrollView)
+
+        scrollUpCaretView = SubmenuScrollCaretView(symbolName: "chevron.up") { [weak self] hovering in
+            self?.setScrolling(.up, active: hovering)
+        }
+        scrollDownCaretView = SubmenuScrollCaretView(symbolName: "chevron.down") { [weak self] hovering in
+            self?.setScrolling(.down, active: hovering)
+        }
+        scrollUpCaretView.isHidden = true
+        scrollDownCaretView.isHidden = true
+        contentView.addSubview(scrollUpCaretView)
+        contentView.addSubview(scrollDownCaretView)
+
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollClipBoundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateScrollCaretVisibility()
+        }
+    }
+
+    private enum ScrollDirection {
+        case up, down
+    }
+
+    private func setScrolling(_ direction: ScrollDirection, active: Bool) {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
+        guard active else { return }
+
+        hoveredRow = nil
+        isDragging = false
+        updateAllRowHighlights()
+
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: scrollRepeatInterval, repeats: true) { [weak self] _ in
+            self?.scrollByRows(direction)
+        }
+    }
+
+    private func scrollByRows(_ direction: ScrollDirection) {
+        guard scrollView != nil else { return }
+        setScrollOffsetY(snappedScrollOffset(after: direction))
+        updateHoverAfterScroll()
+    }
+
+    private func handleScrollWheel(_ event: NSEvent) -> Bool {
+        guard scrollView != nil else { return false }
+        let deltaY = event.scrollingDeltaY
+        guard abs(deltaY) > 0.1 else { return true }
+
+        scrollWheelRemainder += deltaY
+        let threshold: CGFloat = event.hasPreciseScrollingDeltas ? rowHeight : 3
+        guard abs(scrollWheelRemainder) >= threshold else { return true }
+
+        scrollByRows(scrollWheelRemainder < 0 ? .down : .up)
+        scrollWheelRemainder = 0
+        return true
+    }
+
+    private func updateHoverAfterScroll() {
+        guard !isPointerOverVisibleScrollCaret() else { return }
+        guard submenuWindow.frame.contains(NSEvent.mouseLocation) else { return }
+        let row = tableView.rowAtScreenPoint(NSEvent.mouseLocation)
+        guard hoveredRow != row else { return }
+        hoveredRow = row
+        updateAllRowHighlights()
+    }
+
+    private func updateRowVisibilityForScrollCarets() {
+        guard let contentView = submenuWindow.contentView else { return }
+
+        var obscuredRects: [NSRect] = []
+        if !scrollUpCaretView.isHidden {
+            obscuredRects.append(contentView.convert(scrollUpCaretView.frame, to: tableView))
+        }
+        if !scrollDownCaretView.isHidden {
+            obscuredRects.append(contentView.convert(scrollDownCaretView.frame, to: tableView))
+        }
+
+        for row in 0..<tableView.numberOfRows {
+            guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) else { continue }
+            let rowRect = tableView.rect(ofRow: row)
+            let isObscured = obscuredRects.contains { $0.intersects(rowRect) }
+            cellView.alphaValue = isObscured ? 0 : 1
+        }
+    }
+
+    private func clearHoverForScrollCaretIfNeeded() -> Bool {
+        guard isPointerOverVisibleScrollCaret() else { return false }
+        if hoveredRow != nil || isDragging {
+            hoveredRow = nil
+            isDragging = false
+            updateAllRowHighlights()
+        }
+        return true
+    }
+
+    private func isPointerOverVisibleScrollCaret() -> Bool {
+        guard let contentView = submenuWindow.contentView else { return false }
+        let screenRect = NSRect(origin: NSEvent.mouseLocation, size: .zero)
+        let windowPoint = submenuWindow.convertFromScreen(screenRect).origin
+        let point = contentView.convert(windowPoint, from: nil)
+        return (!scrollUpCaretView.isHidden && scrollUpCaretView.frame.contains(point))
+            || (!scrollDownCaretView.isHidden && scrollDownCaretView.frame.contains(point))
+    }
+
+    private func maxScrollOffsetY() -> CGFloat {
+        max(0, tableView.frame.height - scrollView.contentView.bounds.height)
+    }
+
+    private func snappedScrollOffset(after direction: ScrollDirection) -> CGFloat {
+        let currentY = scrollView.contentView.bounds.origin.y
+        let maxY = maxScrollOffsetY()
+        let epsilon: CGFloat = 0.5
+        guard tableView.numberOfRows > 0 else { return 0 }
+
+        switch direction {
+        case .down:
+            for row in 0..<tableView.numberOfRows {
+                let rowY = tableView.rect(ofRow: row).minY
+                if rowY > currentY + epsilon {
+                    return min(rowY, maxY)
+                }
+            }
+            return maxY
+        case .up:
+            for row in stride(from: tableView.numberOfRows - 1, through: 0, by: -1) {
+                let rowY = tableView.rect(ofRow: row).minY
+                if rowY < currentY - epsilon {
+                    return max(0, min(rowY, maxY))
+                }
+            }
+            return 0
+        }
+    }
+
+    private func setScrollOffsetY(_ y: CGFloat) {
+        let clampedY = min(max(0, y), maxScrollOffsetY())
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: clampedY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        updateScrollCaretVisibility()
+    }
+
+    private func layoutScrollCaretViews(canScrollUp: Bool, canScrollDown: Bool) {
+        guard let contentView = submenuWindow.contentView else { return }
+        let bottomPadding = Self.bottomMargin - 1
+        let scrollFrame = NSRect(
+            x: 0,
+            y: bottomPadding,
+            width: contentView.bounds.width,
+            height: max(rowHeight, contentView.bounds.height - titleBarHeight - bottomPadding)
+        )
+        scrollView.frame = scrollFrame
+
+        scrollUpCaretView.frame = NSRect(
+            x: scrollFrame.minX,
+            y: scrollFrame.maxY - caretRowHeight,
+            width: scrollFrame.width,
+            height: caretRowHeight
+        )
+        scrollDownCaretView.frame = NSRect(
+            x: scrollFrame.minX,
+            y: scrollFrame.minY,
+            width: scrollFrame.width,
+            height: caretRowHeight
+        )
+
+        scrollView.layer?.mask = nil
+
+        if scrollUpCaretView.superview == nil {
+            contentView.addSubview(scrollUpCaretView, positioned: .above, relativeTo: scrollView)
+        }
+        if scrollDownCaretView.superview == nil {
+            contentView.addSubview(scrollDownCaretView, positioned: .above, relativeTo: scrollUpCaretView)
+        }
+    }
+
+
+    private func updateScrollCaretVisibility() {
+        guard scrollView != nil else { return }
+        let maxY = maxScrollOffsetY()
+        let currentY = min(scrollView.contentView.bounds.origin.y, maxY)
+        let canScrollUp = currentY > 0.5
+        let canScrollDown = currentY < maxY - 0.5
+
+        layoutScrollCaretViews(canScrollUp: canScrollUp, canScrollDown: canScrollDown)
+
+        if !canScrollUp, scrollUpCaretView.isHovered {
+            scrollUpCaretView.cancelHover()
+        }
+        if !canScrollDown, scrollDownCaretView.isHovered {
+            scrollDownCaretView.cancelHover()
+        }
+
+        scrollUpCaretView.isHidden = !canScrollUp
+        scrollDownCaretView.isHidden = !canScrollDown
+        updateRowVisibilityForScrollCarets()
+
+        if scrollView.contentView.bounds.origin.y > maxY {
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: maxY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    private func screenForSubmenu(relativeTo parentWindow: NSWindow? = nil) -> NSScreen? {
+        if let screen = parentWindow?.screen ?? submenuWindow.screen {
+            return screen
+        }
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first(where: { NSMouseInRect(mouseLocation, $0.frame, false) }) ?? NSScreen.main
+    }
+
+    private func availableWindowHeight(relativeTo parentWindow: NSWindow? = nil) -> CGFloat {
+        guard let screen = screenForSubmenu(relativeTo: parentWindow) else { return .greatestFiniteMagnitude }
+        let topY = parentWindow?.frame.maxY ?? submenuWindow.frame.maxY
+        let bottomY = screen.frame.minY + NextMenusSettings.topLeftInset
+        return max(titleBarHeight + rowHeight, topY - bottomY)
+    }
+
+    private func constrainedWindowHeight(forContentHeight contentH: CGFloat, relativeTo parentWindow: NSWindow? = nil) -> CGFloat {
+        let desired = contentH + titleBarHeight + Self.bottomMargin - 1
+        let available = availableWindowHeight(relativeTo: parentWindow)
+        guard desired > available else { return desired }
+
+        let availableListHeight = max(rowHeight, available - titleBarHeight - Self.bottomMargin + 1)
+        let visibleRows = max(1, floor(availableListHeight / rowHeight))
+        return visibleRows * rowHeight + titleBarHeight + Self.bottomMargin - 1
+    }
+
+    private func updateScrollLayout(resetToTop: Bool = false) {
+        guard scrollView != nil else { return }
+        let contentH = tableContentHeight()
+        let documentH = contentH
+        let maxY = max(0, documentH - scrollView.contentView.bounds.height)
+        tableView.frame.size.height = documentH
+        if resetToTop {
+            setScrollOffsetY(0)
+        } else if scrollView.contentView.bounds.origin.y > maxY {
+            setScrollOffsetY(maxY)
+        } else {
+            updateScrollCaretVisibility()
+        }
     }
 
     // MARK: - Mouse Event Handlers
@@ -576,6 +918,7 @@ class SubmenuWindowController: NSWindowController {
     // Handle mouse hover (no button pressed) - visual highlight only
     private func handleMouseMoved(_ row: Int) {
         guard !suppressRowTrackingUntilMouseUp else { return }
+        guard !clearHoverForScrollCaretIfNeeded() else { return }
         pointerEnteredSelf()
         let rowChanged = hoveredRow != row
         if rowChanged || isDragging {
@@ -628,6 +971,7 @@ class SubmenuWindowController: NSWindowController {
     // Handle mouse down - open the submenu immediately for items that have one
     private func handleMouseDown(_ row: Int) {
         guard !suppressRowTrackingUntilMouseUp else { return }
+        guard !clearHoverForScrollCaretIfNeeded() else { return }
 
         // A click raises this window above its open submenu; re-assert the
         // chain on top afterwards so the submenu stays focused/visible.
@@ -666,6 +1010,7 @@ class SubmenuWindowController: NSWindowController {
     // Handle mouse drag (button held) - open menus while dragging
     private func handleMouseDragged(_ row: Int) {
         guard !suppressRowTrackingUntilMouseUp else { return }
+        guard !clearHoverForScrollCaretIfNeeded() else { return }
 
         // Only count the pointer as "in this window" when it's over a row;
         // during a drag this still fires (mouse capture) when the pointer has
@@ -746,6 +1091,7 @@ class SubmenuWindowController: NSWindowController {
         for i in 0..<tableView.numberOfRows {
             updateRowHighlight(forRow: i)
         }
+        updateRowVisibilityForScrollCarets()
     }
 
     private func closeSubmenu() {
@@ -804,19 +1150,17 @@ class SubmenuWindowController: NSWindowController {
         return min(maxWindowWidth, max(minWindowWidth, ceil(maxWidth)))
     }
 
-    // Resize the window so it exactly fits the current table content.
-    private func resizeWindowToFitContent() {
+    // Resize the window so it fits the table content without extending below
+    // the screen edge (using the same top-left inset as the main menu).
+    private func resizeWindowToFitContent(relativeTo parentWindow: NSWindow? = nil, resetScrollToTop: Bool = false) {
         let contentH = tableContentHeight()
-        let height = contentH + titleBarHeight + Self.bottomMargin - 1
+        let height = constrainedWindowHeight(forContentHeight: contentH, relativeTo: parentWindow)
         var frame = submenuWindow.frame
         frame.origin.y += frame.size.height - height  // keep the top edge fixed
         frame.size.height = height
         frame.size.width = windowWidth
         submenuWindow.setFrame(frame, display: true)
-        // Pin the table to its content height. As a scroll-view documentView
-        // it doesn't auto-shrink when the clip does, so a stale taller frame
-        // would let the scroll view scroll past the rows.
-        tableView.frame.size.height = contentH
+        updateScrollLayout(resetToTop: resetScrollToTop)
     }
 
     // Reuse this window for a different menu item's submenu instead of
@@ -841,7 +1185,7 @@ class SubmenuWindowController: NSWindowController {
         tableView.tableColumns.first?.width = windowWidth
 
         tableView.reloadData()
-        resizeWindowToFitContent()
+        resizeWindowToFitContent(resetScrollToTop: true)
     }
 
     // Opens menuItem's submenu at the given row, reusing the existing child
@@ -1015,6 +1359,7 @@ class SubmenuWindowController: NSWindowController {
 
     func showWindow(rightOf parentWindow: NSWindow, alignedToRow row: Int? = nil) {
         // Position to the right of the parent window with tops aligned
+        resizeWindowToFitContent(relativeTo: parentWindow, resetScrollToTop: true)
         let parentFrame = parentWindow.frame
         let xPos = parentFrame.maxX - 6  // shift 6pt left to overlap parent
         // Align tops: parent's top (maxY) minus child's height gives child's bottom (origin.y)
@@ -1266,6 +1611,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
         // Update row background based on whether it has an open submenu
         updateRowHighlight(forRow: row)
+        updateRowVisibilityForScrollCarets()
     }
 
     private func updateRowHighlight(forRow row: Int) {
@@ -1339,6 +1685,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
     // Handle mouse up - execute leaf actions; submenus open on mouse down
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
+        if clearHoverForScrollCaretIfNeeded() { return }
         isDragging = false
         // A click can also raise this window on mouse-up; keep the chain on top
         defer {
