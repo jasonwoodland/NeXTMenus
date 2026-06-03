@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-struct NextMenusSettings {
+struct NeXTMenusSettings {
     private enum Key {
         static let useZeroTopLeftInset = "useZeroTopLeftInset"
         static let showServicesInMainMenu = "showServicesInMainMenu"
@@ -10,7 +10,7 @@ struct NextMenusSettings {
         static let enableHiding = "enableHiding"
     }
 
-    static let defaultsChangedNotification = Notification.Name("NextMenusSettingsDefaultsChanged")
+    static let defaultsChangedNotification = Notification.Name("NeXTMenusSettingsDefaultsChanged")
 
     static var useZeroTopLeftInset: Bool {
         get { UserDefaults.standard.bool(forKey: Key.useZeroTopLeftInset) }

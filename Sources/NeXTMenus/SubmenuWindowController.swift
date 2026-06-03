@@ -1,4 +1,7 @@
 import Cocoa
+#if SWIFT_PACKAGE
+import NeXTMenusKit
+#endif
 
 private final class SubmenuScrollCaretView: NSView {
     private let onHoverChanged: (Bool) -> Void
@@ -10,11 +13,11 @@ private final class SubmenuScrollCaretView: NSView {
         super.init(frame: .zero)
 
         wantsLayer = true
-        layer?.backgroundColor = NextMenusRendering.useGlassEffects
+        layer?.backgroundColor = NeXTMenusRendering.useGlassEffects
             ? NSColor.clear.cgColor
-            : NextMenusRendering.windowBackgroundColor.cgColor
+            : NeXTMenusRendering.windowBackgroundColor.cgColor
 
-        if NextMenusRendering.useGlassEffects {
+        if NeXTMenusRendering.useGlassEffects {
             let backgroundView = NSVisualEffectView(frame: .zero)
             backgroundView.material = .menu
             backgroundView.blendingMode = .behindWindow
@@ -159,6 +162,14 @@ class SubmenuWindowController: NSWindowController {
         visibleMenuItemsCache = nil
     }
 
+    private func resetInteractionStateForVisibleItemsChange() {
+        closeSubmenu()
+        hoveredRow = nil
+        isDragging = false
+        childHasMouse = false
+        flashState = nil
+    }
+
     // State management for menu interactions
     private var hoveredRow: Int? // Currently highlighted row (visual only)
     private var isDragging: Bool = false // True while a click-drag is in progress
@@ -250,8 +261,8 @@ class SubmenuWindowController: NSWindowController {
         // Low-power opaque drawing can be enabled with NEXTMENUS_LOW_POWER=1.
         submenuWindow.titlebarAppearsTransparent = true
         submenuWindow.titleVisibility = .visible
-        submenuWindow.isOpaque = !NextMenusRendering.useGlassEffects
-        submenuWindow.backgroundColor = NextMenusRendering.useGlassEffects ? .clear : NextMenusRendering.windowBackgroundColor
+        submenuWindow.isOpaque = !NeXTMenusRendering.useGlassEffects
+        submenuWindow.backgroundColor = NeXTMenusRendering.useGlassEffects ? .clear : NeXTMenusRendering.windowBackgroundColor
 
         // Make sure window appears on all spaces
         submenuWindow.collectionBehavior = [.canJoinAllSpaces, .stationary]
@@ -367,9 +378,6 @@ class SubmenuWindowController: NSWindowController {
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self = self, !self.isTornOff else { return }
 
-            // Get click location
-            let clickLocation = event.locationInWindow
-
             // Check if click is outside this window
             if let screenClickLocation = NSEvent.mouseLocation as CGPoint?,
                !self.submenuWindow.frame.contains(screenClickLocation) {
@@ -438,13 +446,14 @@ class SubmenuWindowController: NSWindowController {
                 self.currentModifierFlags = newModifierFlags
                 self.invalidateVisibleMenuItemsCache()
 
-                // Reload the table to show/hide alternate menu items
+                // Reload the table to show/hide alternate menu items. Since
+                // filtering can change row indexes, close any open child
+                // submenu and clear row-index state before trusting rows again.
                 DispatchQueue.main.async {
+                    self.resetInteractionStateForVisibleItemsChange()
                     self.tableView.reloadData()
                     self.resizeWindowToFitContent()
-
-                    // Also notify child submenu to update if it exists
-                    self.childSubmenuController?.updateModifierFlags(newModifierFlags)
+                    self.updateAllRowHighlights()
                 }
             }
         }
@@ -466,11 +475,10 @@ class SubmenuWindowController: NSWindowController {
             }
         }
 
+        resetInteractionStateForVisibleItemsChange()
         tableView.reloadData()
         resizeWindowToFitContent()
-
-        // Propagate to child if exists
-        childSubmenuController?.updateModifierFlags(flags)
+        updateAllRowHighlights()
     }
 
     // Helper to get the parent menu item that opened this submenu
@@ -884,7 +892,7 @@ class SubmenuWindowController: NSWindowController {
     private func availableWindowHeight(relativeTo parentWindow: NSWindow? = nil) -> CGFloat {
         guard let screen = screenForSubmenu(relativeTo: parentWindow) else { return .greatestFiniteMagnitude }
         let topY = parentWindow?.frame.maxY ?? submenuWindow.frame.maxY
-        let bottomY = screen.frame.minY + NextMenusSettings.topLeftInset
+        let bottomY = screen.frame.minY + NeXTMenusSettings.topLeftInset
         return max(titleBarHeight + rowHeight, topY - bottomY)
     }
 
@@ -1303,21 +1311,44 @@ class SubmenuWindowController: NSWindowController {
     }
 
     private func optimisticallyToggleMarkIfNeeded(at row: Int) -> Bool {
-        guard isTornOff, row >= 0, row < menuItems.count else { return false }
-        let key = checkableKey(for: menuItems[row])
-        guard menuItems[row].markChar != nil || checkableItemKeys.contains(key) else { return false }
+        guard isTornOff,
+              row >= 0,
+              row < visibleMenuItems.count,
+              let sourceIndex = sourceMenuItemIndex(forVisibleRow: row) else { return false }
 
-        if menuItems[row].markChar == nil {
-            menuItems[row].markChar = "✓"
+        let key = checkableKey(for: menuItems[sourceIndex])
+        guard menuItems[sourceIndex].markChar != nil || checkableItemKeys.contains(key) else { return false }
+
+        if menuItems[sourceIndex].markChar == nil {
+            menuItems[sourceIndex].markChar = "✓"
             checkableItemKeys.insert(key)
         } else {
-            menuItems[row].markChar = nil
+            menuItems[sourceIndex].markChar = nil
         }
         menuItemsVersion += 1
         invalidateVisibleMenuItemsCache()
         tableView.reloadData()
         updateAllRowHighlights()
         return true
+    }
+
+    private func sourceMenuItemIndex(forVisibleRow row: Int) -> Int? {
+        guard row >= 0, row < visibleMenuItems.count else { return nil }
+        let visibleItem = visibleMenuItems[row]
+        let visibleKey = checkableKey(for: visibleItem)
+
+        return menuItems.indices.first { index in
+            let item = menuItems[index]
+            if let visibleElement = visibleItem.element,
+               let itemElement = item.element,
+               CFEqual(itemElement, visibleElement) {
+                return true
+            }
+            return checkableKey(for: item) == visibleKey
+                && item.title == visibleItem.title
+                && item.isSeparator == visibleItem.isSeparator
+                && item.isAlternate == visibleItem.isAlternate
+        }
     }
 
     private func checkableKey(for item: MenuItem) -> String {
@@ -1459,7 +1490,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
             // Rounded selection highlight, shown/hidden by
             // updateRowHighlight(). Full row height (no gap between items).
-            let backgroundView = NextMenusRendering.makeSelectionBackground(
+            let backgroundView = NeXTMenusRendering.makeSelectionBackground(
                 frame: CGRect(x: 6, y: 0, width: windowWidth - 12, height: rowHeight)
             )
             backgroundView.identifier = NSUserInterfaceItemIdentifier("BackgroundView")
@@ -1765,11 +1796,12 @@ extension SubmenuWindowController: NSTableViewDelegate {
         // Deselect immediately for button-like behavior
         tableView.deselectRow(selectedRow)
 
-        let menuItem = menuItems[selectedRow]
+        guard selectedRow < visibleMenuItems.count else { return }
+        let menuItem = visibleMenuItems[selectedRow]
 
         // Check if clicking on the same item that's already open - toggle it closed
         if let existingChild = childSubmenuController, childSubmenuRow == selectedRow {
-            childSubmenuController?.hideWindow()
+            existingChild.hideWindow()
             childSubmenuController = nil
             childSubmenuRow = nil
 
@@ -1781,7 +1813,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
         }
 
         // Use the pre-extracted submenu tree (falls back to on-demand)
-        if menuItem.hasSubmenu, let element = menuItem.element {
+        if menuItem.hasSubmenu {
             let submenuItems = MenuExtractor.submenuItems(for: menuItem)
 
             if !submenuItems.isEmpty {

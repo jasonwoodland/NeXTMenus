@@ -1,26 +1,8 @@
 import Cocoa
 import ApplicationServices
-
-struct MenuItem {
-    let title: String
-    let isEnabled: Bool
-    let hasSubmenu: Bool
-    let isSeparator: Bool
-    let element: AXUIElement?
-    var submenuItems: [MenuItem]
-
-    // Modifier key support
-    let keyEquivalent: String? // Keyboard shortcut (e.g., "⌘S")
-    let requiredModifiers: NSEvent.ModifierFlags? // Modifiers required for this item to be visible
-    let isAlternate: Bool // Whether this is an alternate menu item (shown only with modifiers)
-    let alternateTitle: String? // Title to show when modifiers are held (e.g., "Save As..." becomes "Save...")
-
-    // AXMenuItem attributes
-    let cmdGlyph: Int? // kAXMenuItemCmdGlyph - special-key glyph code for the shortcut
-    var markChar: String? // kAXMenuItemMarkChar - mark character (e.g. "✓" for checked items)
-    let cmdChar: String? // kAXMenuItemCmdChar - raw shortcut character (used to detect alternates)
-    let cmdModifiers: Int? // kAXMenuItemCmdModifiers - raw modifier mask (used to detect alternates)
-}
+#if SWIFT_PACKAGE
+import NeXTMenusKit
+#endif
 
 class MenuExtractor {
     private static func focusedWindow(for app: NSRunningApplication) -> AXUIElement? {

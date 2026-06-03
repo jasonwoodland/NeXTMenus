@@ -4,10 +4,9 @@
 Package.resolved
 
 # Xcode
-*.xcodeproj/
-*.xcworkspace/
 xcuserdata/
 *.xcuserstate
+build/
 
 # macOS
 .DS_Store

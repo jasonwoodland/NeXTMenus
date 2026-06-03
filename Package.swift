@@ -2,37 +2,30 @@
 import PackageDescription
 
 let package = Package(
-    name: "NextMenus",
+    name: "NeXTMenus",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .executable(
-            name: "NextMenus",
-            targets: ["NextMenus"]
+            name: "NeXTMenus",
+            targets: ["NeXTMenus"]
         )
     ],
     targets: [
+        .target(
+            name: "NeXTMenusKit",
+            path: "Sources/NeXTMenusKit"
+        ),
         .executableTarget(
-            name: "NextMenus",
-            path: ".",
-            exclude: [
-                "README.md",
-                "Info.plist"
-            ],
-            sources: [
-                "NextMenusApp.swift",
-                "AppDelegate.swift",
-                "ApplicationObserver.swift",
-                "MenuExtractor.swift",
-                "MenuItemVisibility.swift",
-                "NextMenusSettings.swift",
-                "MenuWindowController.swift",
-                "SubmenuWindowController.swift",
-                "NonActivatingWindow.swift",
-                "HoverTableView.swift",
-                "CenteredLabel.swift"
-            ]
+            name: "NeXTMenus",
+            dependencies: ["NeXTMenusKit"],
+            path: "Sources/NeXTMenus"
+        ),
+        .testTarget(
+            name: "NeXTMenusKitTests",
+            dependencies: ["NeXTMenusKit"],
+            path: "Tests/NeXTMenusKitTests"
         )
     ]
 )

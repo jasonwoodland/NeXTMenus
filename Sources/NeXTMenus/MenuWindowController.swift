@@ -1,5 +1,8 @@
 import Cocoa
 import ServiceManagement
+#if SWIFT_PACKAGE
+import NeXTMenusKit
+#endif
 
 class MenuWindowController: NSWindowController {
     private var menuWindow: NSWindow!
@@ -77,7 +80,7 @@ class MenuWindowController: NSWindowController {
     private var promotedAppMenuItemsCache: (version: Int, items: [MenuItem])?
 
     private var promotedAppMenuItems: [MenuItem] {
-        guard NextMenusSettings.showServicesInMainMenu else { return [] }
+        guard NeXTMenusSettings.showServicesInMainMenu else { return [] }
         if let cache = promotedAppMenuItemsCache,
            cache.version == menuItemsVersion {
             return cache.items
@@ -91,8 +94,8 @@ class MenuWindowController: NSWindowController {
 
     private var visibleTrailingActions: [TrailingAction] {
         var actions: [TrailingAction] = []
-        if NextMenusSettings.showHideInMainMenu { actions.append(.hide) }
-        if NextMenusSettings.showQuitInMainMenu {
+        if NeXTMenusSettings.showHideInMainMenu { actions.append(.hide) }
+        if NeXTMenusSettings.showQuitInMainMenu {
             actions.append(isFinderTarget ? .logOut : .quit)
         }
         return actions
@@ -170,6 +173,20 @@ class MenuWindowController: NSWindowController {
         promotedAppMenuItemsCache = nil
     }
 
+    private func resetInteractionStateForVisibleItemsChange() {
+        asyncSubmenuOpenGeneration += 1
+        childSubmenuController?.hideWindow(animated: false)
+        childSubmenuController = nil
+        childSubmenuRow = nil
+        hoveredRow = nil
+        isDragging = false
+        pressedRow = nil
+        pressedRowWasOpen = false
+        childHasMouse = false
+        isMenuActive = false
+        flashState = nil
+    }
+
     init(appName: String, appMenuItem: MenuItem?, menuItems: [MenuItem], targetApp: NSRunningApplication) {
         self.appName = appName
         self.appMenuItem = appMenuItem
@@ -178,8 +195,8 @@ class MenuWindowController: NSWindowController {
 
         // Calculate window height based on number of items
         // Add 1 for the "Info" row (app menu)
-        let numberOfTrailingRows = (NextMenusSettings.showHideInMainMenu ? 1 : 0)
-            + (NextMenusSettings.showQuitInMainMenu ? 1 : 0)
+        let numberOfTrailingRows = (NeXTMenusSettings.showHideInMainMenu ? 1 : 0)
+            + (NeXTMenusSettings.showQuitInMainMenu ? 1 : 0)
         let numberOfRows = menuItems.count + 1 + numberOfTrailingRows
         let contentHeight = CGFloat(numberOfRows) * rowHeight
         let windowHeight = contentHeight + titleBarHeight + Self.bottomMargin - 1
@@ -222,8 +239,8 @@ class MenuWindowController: NSWindowController {
         // Low-power opaque drawing can be enabled with NEXTMENUS_LOW_POWER=1.
         menuWindow.titlebarAppearsTransparent = true
         menuWindow.titleVisibility = .visible
-        menuWindow.isOpaque = !NextMenusRendering.useGlassEffects
-        menuWindow.backgroundColor = NextMenusRendering.useGlassEffects ? .clear : NextMenusRendering.windowBackgroundColor
+        menuWindow.isOpaque = !NeXTMenusRendering.useGlassEffects
+        menuWindow.backgroundColor = NeXTMenusRendering.useGlassEffects ? .clear : NeXTMenusRendering.windowBackgroundColor
 
         // Make sure window appears on all spaces
         menuWindow.collectionBehavior = [.canJoinAllSpaces, .stationary]
@@ -252,7 +269,7 @@ class MenuWindowController: NSWindowController {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(settingsDidChange(_:)),
-            name: NextMenusSettings.defaultsChangedNotification,
+            name: NeXTMenusSettings.defaultsChangedNotification,
             object: nil
         )
     }
@@ -262,7 +279,7 @@ class MenuWindowController: NSWindowController {
             if localDragMonitor == nil { setupDragMonitor() }
             if clickOutsideMonitor == nil { setupClickOutsideMonitor() }
             if modifierMonitor == nil { setupModifierMonitor() }
-            if NextMenusSettings.enableHiding, hideHoverMonitor == nil || localHideHoverMonitor == nil { setupHideHoverMonitor() }
+            if NeXTMenusSettings.enableHiding, hideHoverMonitor == nil || localHideHoverMonitor == nil { setupHideHoverMonitor() }
         } else {
             if let monitor = localDragMonitor {
                 NSEvent.removeMonitor(monitor)
@@ -379,13 +396,14 @@ class MenuWindowController: NSWindowController {
                 // Don't re-extract top-level menu items since they typically don't change
                 // The submenu items will be re-extracted when opened
 
-                // Reload the table to show/hide alternate menu items
+                // Reload the table to show/hide alternate menu items. Since
+                // filtering can change row indexes, close any open submenu and
+                // clear row-index state before trusting visible rows again.
                 DispatchQueue.main.async {
+                    self.resetInteractionStateForVisibleItemsChange()
                     self.tableView.reloadData()
                     self.resizeWindowToFitContent()
-
-                    // Also notify child submenu to update if it exists
-                    self.childSubmenuController?.updateModifierFlags(newModifierFlags)
+                    self.updateAllRowHighlights()
                 }
             }
         }
@@ -432,7 +450,7 @@ class MenuWindowController: NSWindowController {
     }
 
     @objc private func settingsDidChange(_ notification: Notification) {
-        if !NextMenusSettings.enableHiding {
+        if !NeXTMenusSettings.enableHiding {
             disableHoverHiding()
         }
         invalidateVisibleMenuItemsCache()
@@ -532,25 +550,25 @@ class MenuWindowController: NSWindowController {
 
         let insetItem = menu.addItem(withTitle: "Inset from Top Left", action: #selector(toggleTopLeftInset(_:)), keyEquivalent: "")
         insetItem.target = self
-        insetItem.state = NextMenusSettings.useZeroTopLeftInset ? .off : .on
+        insetItem.state = NeXTMenusSettings.useZeroTopLeftInset ? .off : .on
 
         let hidingItem = menu.addItem(withTitle: "Enable Hiding", action: #selector(toggleEnableHiding(_:)), keyEquivalent: "")
         hidingItem.target = self
-        hidingItem.state = NextMenusSettings.enableHiding ? .on : .off
+        hidingItem.state = NeXTMenusSettings.enableHiding ? .on : .off
 
         menu.addItem(.separator())
 
         let servicesItem = menu.addItem(withTitle: "Show Services in Main Menu", action: #selector(toggleShowServices(_:)), keyEquivalent: "")
         servicesItem.target = self
-        servicesItem.state = NextMenusSettings.showServicesInMainMenu ? .on : .off
+        servicesItem.state = NeXTMenusSettings.showServicesInMainMenu ? .on : .off
 
         let hideItem = menu.addItem(withTitle: "Show Hide in Main Menu", action: #selector(toggleShowHide(_:)), keyEquivalent: "")
         hideItem.target = self
-        hideItem.state = NextMenusSettings.showHideInMainMenu ? .on : .off
+        hideItem.state = NeXTMenusSettings.showHideInMainMenu ? .on : .off
 
         let quitItem = menu.addItem(withTitle: "Show Quit in Main Menu", action: #selector(toggleShowQuit(_:)), keyEquivalent: "")
         quitItem.target = self
-        quitItem.state = NextMenusSettings.showQuitInMainMenu ? .on : .off
+        quitItem.state = NeXTMenusSettings.showQuitInMainMenu ? .on : .off
 
         menu.addItem(.separator())
 
@@ -569,17 +587,17 @@ class MenuWindowController: NSWindowController {
     }
 
     @objc private func toggleTopLeftInset(_ sender: NSMenuItem) {
-        NextMenusSettings.useZeroTopLeftInset.toggle()
+        NeXTMenusSettings.useZeroTopLeftInset.toggle()
         resetPosition()
     }
 
     @objc private func toggleShowServices(_ sender: NSMenuItem) {
-        NextMenusSettings.showServicesInMainMenu.toggle()
+        NeXTMenusSettings.showServicesInMainMenu.toggle()
     }
 
     @objc private func toggleEnableHiding(_ sender: NSMenuItem) {
-        NextMenusSettings.enableHiding.toggle()
-        if NextMenusSettings.enableHiding {
+        NeXTMenusSettings.enableHiding.toggle()
+        if NeXTMenusSettings.enableHiding {
             normalVisibleOrigin = visibleOriginForCurrentScreen()
             showWindow()
             hideForHover()
@@ -589,11 +607,11 @@ class MenuWindowController: NSWindowController {
     }
 
     @objc private func toggleShowHide(_ sender: NSMenuItem) {
-        NextMenusSettings.showHideInMainMenu.toggle()
+        NeXTMenusSettings.showHideInMainMenu.toggle()
     }
 
     @objc private func toggleShowQuit(_ sender: NSMenuItem) {
-        NextMenusSettings.showQuitInMainMenu.toggle()
+        NeXTMenusSettings.showQuitInMainMenu.toggle()
     }
 
     private var isOpenAtLoginEnabled: Bool {
@@ -759,7 +777,7 @@ class MenuWindowController: NSWindowController {
 
     func showWindow() {
         setInteractionMonitoringEnabled(true)
-        if NextMenusSettings.enableHiding {
+        if NeXTMenusSettings.enableHiding {
             normalVisibleOrigin = normalVisibleOrigin ?? visibleOriginForCurrentScreen()
             if isHoverHidden { hideForHover() }
         }
@@ -809,7 +827,7 @@ class MenuWindowController: NSWindowController {
         isHoverHidden = false
         menuWindow.setFrameOrigin(origin)
 
-        if NextMenusSettings.enableHiding {
+        if NeXTMenusSettings.enableHiding {
             hideForHover(animated: false)
         }
     }
@@ -828,7 +846,7 @@ class MenuWindowController: NSWindowController {
 
     private func visibleOrigin(on screen: NSScreen) -> NSPoint {
         let windowHeight = menuWindow.frame.height
-        let inset = NextMenusSettings.topLeftInset
+        let inset = NeXTMenusSettings.topLeftInset
         return NSPoint(
             x: screen.frame.origin.x + inset,
             y: screen.frame.maxY - windowHeight - inset
@@ -851,10 +869,10 @@ class MenuWindowController: NSWindowController {
     }
 
     private func hideForHover(animated: Bool = true) {
-        guard NextMenusSettings.enableHiding else { return }
+        guard NeXTMenusSettings.enableHiding else { return }
         let visibleOrigin = normalVisibleOrigin ?? menuWindow.frame.origin
         normalVisibleOrigin = visibleOrigin
-        let screenLeftEdge = visibleOrigin.x - NextMenusSettings.topLeftInset
+        let screenLeftEdge = visibleOrigin.x - NeXTMenusSettings.topLeftInset
         let hiddenOrigin = NSPoint(x: screenLeftEdge - menuWindow.frame.width - hoverHideShadowClearance, y: visibleOrigin.y)
         setHoverFrameOrigin(hiddenOrigin, animated: animated)
         isHoverHidden = true
@@ -887,7 +905,7 @@ class MenuWindowController: NSWindowController {
     }
 
     private func updateHoverHiding(for mouseLocation: NSPoint) {
-        guard NextMenusSettings.enableHiding, menuWindow.isVisible else { return }
+        guard NeXTMenusSettings.enableHiding, menuWindow.isVisible else { return }
         let frame = menuWindow.frame
 
         if isHoverHidden {
@@ -950,7 +968,7 @@ class MenuWindowController: NSWindowController {
 
     private func dismissAfterAction() {
         collapseSubmenus()
-        if NextMenusSettings.enableHiding {
+        if NeXTMenusSettings.enableHiding {
             hideForHover()
         }
     }
@@ -1017,7 +1035,7 @@ extension MenuWindowController: NSTableViewDelegate {
 
             // Rounded selection highlight, shown/hidden by
             // updateRowHighlight(). Full row height (no gap between items).
-            let backgroundView = NextMenusRendering.makeSelectionBackground(
+            let backgroundView = NeXTMenusRendering.makeSelectionBackground(
                 frame: CGRect(x: 6, y: 0, width: windowWidth - 12, height: rowHeight)
             )
             backgroundView.identifier = NSUserInterfaceItemIdentifier("BackgroundView")

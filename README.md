@@ -31,15 +31,25 @@ Enable it in:
 ```bash
 swift build
 swift run
+swift test
 ```
 
-Release build:
+The Swift package product and module are both named `NeXTMenus`.
+
+### Xcode app bundle
+
+Open `NeXTMenus.xcodeproj` in Xcode, then build and run the `NeXTMenus` app target.
+
+For a command-line release `.app` build, use the Makefile entry point:
 
 ```bash
-swift build -c release
-swift run -c release
+make release
 ```
 
-### Xcode
+The built app is written to `build/Release/NeXTMenus.app`.
 
-Open `Package.swift` in Xcode, then build and run the `NextMenus` app target.
+To check the Xcode source list, run the SwiftPM build and tests, and build the release app together:
+
+```bash
+make verify
+```

@@ -41,7 +41,7 @@ class NonActivatingWindow: NSPanel {
     }
 
     private func setupBackground() {
-        if NextMenusRendering.useGlassEffects {
+        if NeXTMenusRendering.useGlassEffects {
             let visualEffectView = NSVisualEffectView(frame: contentView?.bounds ?? .zero)
             visualEffectView.autoresizingMask = [.width, .height]
             visualEffectView.material = .menu
@@ -61,13 +61,13 @@ class NonActivatingWindow: NSPanel {
         let backgroundView = NSView(frame: contentView?.bounds ?? .zero)
         backgroundView.autoresizingMask = [.width, .height]
         backgroundView.wantsLayer = true
-        backgroundView.layer?.backgroundColor = NextMenusRendering.windowBackgroundColor.cgColor
+        backgroundView.layer?.backgroundColor = NeXTMenusRendering.windowBackgroundColor.cgColor
         backgroundView.layer?.cornerRadius = 10
         backgroundView.layer?.cornerCurve = .continuous
         backgroundView.layer?.masksToBounds = true
         self.contentView = backgroundView
 
         self.isOpaque = true
-        self.backgroundColor = NextMenusRendering.windowBackgroundColor
+        self.backgroundColor = NeXTMenusRendering.windowBackgroundColor
     }
 }
