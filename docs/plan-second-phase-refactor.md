@@ -2,7 +2,9 @@
 
 ## Status
 
-Draft for review. The refactor is explicitly scoped as behavior-preserving; UX changes should be captured as separate follow-ups.
+Phase 1 is implemented and merged to `main` as `4b11d3d refactor: extract main menu row mapping`.
+
+Phase 2 design is approved for planning: extract tested per-row highlight appearance predicates only. The refactor remains explicitly scoped as behavior-preserving; UX changes should be captured as separate follow-ups.
 
 ## Context
 
@@ -160,63 +162,179 @@ Cover:
 - Manual: top-level menu still shows Info, Services, Hide/Quit/Log Out correctly.
 - Manual: initial menu height and subsequent resize behavior appear unchanged.
 
-## Phase 2: Characterize highlight and interaction state
+## Phase 2: Extract highlight appearance policy
+
+### Approved scope
+
+Phase 2 is behavior-preserving and limited to per-row highlight/render-state predicates. It must not move event mutation, submenu lifecycle, timers, AppKit view mutation, AX calls, torn-off/window behavior, or reducer-style interaction handling.
+
+Controllers remain responsible for:
+
+- mouse event handlers and row tracking state mutation;
+- opening, closing, and retaining submenu controllers;
+- computing controller-local row facts such as selectability, trailing-action status, and submenu-row status;
+- AppKit view lookup and mutation in `updateRowHighlight(forRow:)`;
+- flash timers and action execution.
+
+`NeXTMenusKit` should only answer: given the current row facts and interaction state snapshot, what highlight appearance should this row have?
 
 ### Files
 
-- Add: `Sources/NeXTMenusKit/MenuInteractionState.swift`
 - Add: `Sources/NeXTMenusKit/MenuHighlightPolicy.swift`
 - Add tests in `Tests/NeXTMenusKitTests/MenuHighlightPolicyTests.swift`
 - Modify:
+  - `NeXTMenus.xcodeproj/project.pbxproj`
   - `Sources/NeXTMenus/MenuWindowController.swift`
   - `Sources/NeXTMenus/SubmenuWindowController.swift`
 
-### Current logic to extract first
+Do not add `MenuInteractionState.swift` in Phase 2 unless implementation evidence shows a tiny shared value type is needed. Broader interaction-state reducers belong to Phase 3.
 
-Start with predicates only, not event mutation:
+### Target API shape
+
+Use one shared policy type with separate main/submenu entry points so the two controllers' subtle behavior differences stay explicit:
+
+```swift
+public struct MenuRowAppearance: Equatable {
+    public let isHighlighted: Bool
+    public let isEmphasized: Bool
+}
+
+public struct MenuRowFlash: Equatable {
+    public let row: Int
+    public let isOn: Bool
+}
+
+public enum MenuHighlightPolicy {
+    public static func mainRowAppearance(
+        row: Int,
+        isHoverable: Bool,
+        isTrailingAction: Bool,
+        hoveredRow: Int?,
+        childSubmenuRow: Int?,
+        childHasMouse: Bool,
+        pressedRow: Int?,
+        isDragging: Bool,
+        isMenuActive: Bool,
+        flash: MenuRowFlash?
+    ) -> MenuRowAppearance
+
+    public static func submenuRowAppearance(
+        row: Int,
+        isHoverable: Bool,
+        isSubmenuRow: Bool,
+        hoveredRow: Int?,
+        childSubmenuRow: Int?,
+        childHasMouse: Bool,
+        isDragging: Bool,
+        isTornOff: Bool,
+        flash: MenuRowFlash?
+    ) -> MenuRowAppearance
+}
+```
+
+`MenuRowAppearance.isHighlighted` drives the background hidden state, `NSTableCellView.backgroundStyle`, and `ShortcutView.setEmphasized(_:)`. `MenuRowAppearance.isEmphasized` drives the selection background `NSVisualEffectView.isEmphasized` value. Keep those two outputs separate because the current code computes visual-effect emphasis independently from whether the highlight background is hidden.
+
+### Current logic to extract
+
+Extract the boolean decision logic from:
 
 - `MenuWindowController.updateRowHighlight(forRow:)`
 - `SubmenuWindowController.updateRowHighlight(forRow:)`
 
-Model the relevant state explicitly:
+Keep the controller-side mechanics around the extracted call:
 
-- `hoveredRow`
-- `isDragging`
-- `childSubmenuRow`
-- `childHasMouse`
-- `pressedRow`
-- `pressedRowWasOpen`
-- `isMenuActive`
-- `flashState`
-- `isTornOff`
+1. Look up the cell view and background/shortcut subviews.
+2. Compute row facts using existing helpers:
+   - main `isHoverable`: current `tableView(_:shouldSelectRow:)` / `mainMenuRows.isSelectable(row:)` result;
+   - main `isTrailingAction`: `trailingAction(at: row) != nil`;
+   - submenu `isHoverable`: current `tableView(_:shouldSelectRow:)` result;
+   - submenu `isSubmenuRow`: existing enabled, non-separator, has-submenu predicate.
+3. Convert controller flash tuples to `MenuRowFlash(row:isOn:)`.
+4. Ask `MenuHighlightPolicy` for `MenuRowAppearance`.
+5. Apply returned values to AppKit views exactly where the controller currently mutates them.
+
+### Behavior preservation details
+
+Main menu policy must preserve:
+
+- Flash state overrides normal highlight selection for the flashing row, including flash-off producing an unhighlighted row.
+- A plain hover over a main row with no open submenu/tracking state remains unhighlighted.
+- A child submenu row stays highlighted while its submenu is open.
+- When a child submenu is open, hovering a sibling main row highlights that sibling.
+- During click-drag over main rows, only the hovered row highlights.
+- During click-drag off main rows, the open child row remains highlighted.
+- Main trailing actions do not highlight on plain hover.
+- Main trailing actions highlight when pressed or when the main menu is in click-open tracking mode.
+- The open-submenu row de-emphasizes when `childHasMouse` is true or when dragging with the pointer off main rows.
+- Disabled/separator/non-hoverable rows do not highlight except through the existing flash override.
+
+Submenu policy must preserve:
+
+- Flash state overrides normal highlight selection for the flashing row, including flash-off producing an unhighlighted row.
+- Attached submenus highlight any hoverable hovered row.
+- Attached submenus keep the open child submenu row highlighted.
+- Torn-off submenus keep the open child submenu row highlighted.
+- Torn-off submenu leaf rows do not highlight on plain hover.
+- Torn-off submenu rows highlight on hover while click-dragging.
+- Torn-off submenu rows that themselves have submenus highlight on hover while another child submenu is open.
+- The open child submenu row de-emphasizes when `childHasMouse` is true.
+- Disabled/separator/non-hoverable rows do not highlight except through the existing flash override.
 
 ### Tests
 
-Cover highlight snapshots:
+Add characterization tests before replacing the controller logic. Cover at least:
 
-- Main idle row.
-- Main row with child submenu open.
-- Main drag over a row.
-- Main drag off rows while child submenu remains open.
-- Main trailing action pressed.
-- Main trailing action in tracking mode.
-- Flash override on/off.
-- Submenu attached hover.
-- Submenu torn-off hover for leaf row.
-- Submenu torn-off submenu row while child open.
-- Child pointer de-emphasis.
+- Main plain hover with no child submenu remains unhighlighted.
+- Main row with child submenu open is highlighted.
+- Main sibling hover while child submenu is open is highlighted.
+- Main drag over a row highlights only that row.
+- Main open child row is highlighted but de-emphasized when `childHasMouse == true`.
+- Main drag off rows keeps the open child row highlighted and de-emphasized.
+- Main trailing action plain hover is unhighlighted.
+- Main trailing action pressed is highlighted.
+- Main trailing action in tracking mode is highlighted.
+- Main flash on/off overrides normal row state.
+- Main non-hoverable row stays unhighlighted without flash.
+- Submenu attached hover is highlighted.
+- Submenu attached child row is highlighted.
+- Submenu torn-off leaf hover is unhighlighted.
+- Submenu torn-off drag hover is highlighted.
+- Submenu torn-off submenu row while child open is highlighted.
+- Submenu child pointer de-emphasis is represented.
+- Submenu flash on/off overrides normal row state.
+- Submenu non-hoverable row stays unhighlighted without flash.
+
+### Implementation order
+
+1. Create a fresh Phase 2 worktree from `main` after implementation approval:
+   - Branch: `refactor/menu-highlight-policy`
+   - Worktree: `.worktrees/refactor/menu-highlight-policy/`
+2. Run baseline verification in that worktree.
+3. Add failing `MenuHighlightPolicyTests` for the characterization matrix.
+4. Add `MenuHighlightPolicy.swift` in `NeXTMenusKit` and update the Xcode source list.
+5. Replace the duplicated boolean logic inside both controllers' `updateRowHighlight(forRow:)` methods with policy calls.
+6. Run focused tests, source-list check, `git diff --check`, and `make verify`.
+7. Perform implementation review before commit/handoff.
 
 ### Verification
 
 - `swift test`
+- `make check-sources`
+- `git diff --check`
 - `make verify`
-- Manual hover/press behavior in main and submenu windows.
+- Manual hover/press behavior in main and submenu windows:
+  - main plain hover before opening any submenu;
+  - click-open main row and hover siblings;
+  - click/press Hide or Quit/Log Out row;
+  - drag from main row into child submenu;
+  - attached submenu hover and child hover;
+  - torn-off submenu leaf hover and submenu-row hover.
 
 ## Phase 3: Extract interaction reducer after highlight policy is covered
 
 ### Files
 
-- Extend: `Sources/NeXTMenusKit/MenuInteractionState.swift`
+- Add or extend: `Sources/NeXTMenusKit/MenuInteractionState.swift`
 - Add tests in `Tests/NeXTMenusKitTests/MenuInteractionStateTests.swift`
 - Modify:
   - `Sources/NeXTMenus/MenuWindowController.swift`
@@ -520,17 +638,21 @@ make verify
 
 ## Branch/worktree strategy for implementation
 
-If this plan is approved for implementation, create a dedicated worktree from the canonical repo-local path:
+Create a dedicated worktree per approved phase from the canonical repo-local path. The branch name and worktree path must match one-to-one.
 
-- Branch: `refactor/menu-controller-simplification`
-- Worktree: `.worktrees/refactor/menu-controller-simplification/`
+For the approved Phase 2 implementation slice, use:
 
-Before creating it:
+- Branch: `refactor/menu-highlight-policy`
+- Worktree: `.worktrees/refactor/menu-highlight-policy/`
+
+Before creating any phase worktree:
 
 1. Inspect dirty state with `git status --short --branch`.
-2. Confirm whether the repo is already in a linked worktree with `git rev-parse --show-toplevel` and `git worktree list`.
-3. Confirm `.worktrees/` is ignored with `git check-ignore .worktrees/`.
-4. If `.worktrees/` is not ignored, add or choose an approved alternative before creating the worktree.
+2. If the repo is not clean, stop and resolve, commit, stash, or explicitly confirm how to carry the changes before creating the phase worktree from `main`.
+3. Confirm whether the repo is already in a linked worktree with `git rev-parse --show-toplevel` and `git worktree list`.
+4. Confirm `.worktrees/` is ignored with `git check-ignore .worktrees/`.
+5. If `.worktrees/` is not ignored, add or choose an approved alternative before creating the worktree.
+6. Do not reuse a prior phase worktree for a new branch.
 
 ## Review gates
 
@@ -541,14 +663,14 @@ Each phase should have:
 3. `make verify` pass.
 4. Code review before proceeding to the next phase.
 
-## Recommended first implementation slice
+## Recommended next implementation slice
 
-Decision: the first implementation approval should cover Phase 1 only.
+Phase 1 is complete and merged. The next approval should cover Phase 2 only.
 
 Start with:
 
-- Add `MainMenuRows` and tests.
-- Replace main-menu row mapping calls.
-- Do not touch mouse handling, submenu coordination, rendering, scrolling, or torn-off behavior yet.
+- Add `MenuHighlightPolicy` and characterization tests.
+- Replace only the highlight predicate logic inside the two `updateRowHighlight(forRow:)` methods.
+- Do not touch event handling, submenu coordination, action execution, rendering layout, scrolling, or torn-off behavior beyond applying the returned highlight appearance.
 
-This gives immediate simplification and test coverage with the lowest behavior risk. Later phases require separate review/approval after Phase 1 is verified.
+This keeps Phase 2 small, testable, and behavior-preserving. Later phases still require separate review/approval after Phase 2 is verified.
