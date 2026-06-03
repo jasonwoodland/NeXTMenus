@@ -21,6 +21,7 @@
 		A0000000000000000000000C /* MenuItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010D /* MenuItem.swift */; };
 		A0000000000000000000000D /* NeXTMenusRendering.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010E /* NeXTMenusRendering.swift */; };
 		A0000000000000000000000E /* MainMenuRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010F /* MainMenuRows.swift */; };
+		A0000000000000000000000F /* MenuHighlightPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000110 /* MenuHighlightPolicy.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +41,7 @@
 		A0000000000000000000010D /* MenuItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuItem.swift; sourceTree = "<group>"; };
 		A0000000000000000000010E /* NeXTMenusRendering.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeXTMenusRendering.swift; sourceTree = "<group>"; };
 		A0000000000000000000010F /* MainMenuRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuRows.swift; sourceTree = "<group>"; };
+		A00000000000000000000110 /* MenuHighlightPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuHighlightPolicy.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,7 +51,7 @@
 /* Begin PBXGroup section */
 		A00000000000000000000040 = {isa = PBXGroup; children = (A00000000000000000000050 /* App Sources */, A00000000000000000000051 /* Kit Sources */, A0000000000000000000010C /* Info.plist */, A00000000000000000000060 /* Products */); sourceTree = "<group>"; };
 		A00000000000000000000050 /* App Sources */ = {isa = PBXGroup; children = (A00000000000000000000101 /* NeXTMenusApp.swift */, A00000000000000000000102 /* AppDelegate.swift */, A00000000000000000000103 /* ApplicationObserver.swift */, A00000000000000000000104 /* MenuExtractor.swift */, A00000000000000000000106 /* NeXTMenusSettings.swift */, A00000000000000000000107 /* MenuWindowController.swift */, A00000000000000000000108 /* SubmenuWindowController.swift */, A00000000000000000000109 /* NonActivatingWindow.swift */, A0000000000000000000010A /* HoverTableView.swift */, A0000000000000000000010B /* CenteredLabel.swift */, A0000000000000000000010E /* NeXTMenusRendering.swift */); path = Sources/NeXTMenus; sourceTree = "<group>"; };
-		A00000000000000000000051 /* Kit Sources */ = {isa = PBXGroup; children = (A0000000000000000000010D /* MenuItem.swift */, A00000000000000000000105 /* MenuItemVisibility.swift */, A0000000000000000000010F /* MainMenuRows.swift */); path = Sources/NeXTMenusKit; sourceTree = "<group>"; };
+		A00000000000000000000051 /* Kit Sources */ = {isa = PBXGroup; children = (A0000000000000000000010D /* MenuItem.swift */, A00000000000000000000105 /* MenuItemVisibility.swift */, A0000000000000000000010F /* MainMenuRows.swift */, A00000000000000000000110 /* MenuHighlightPolicy.swift */); path = Sources/NeXTMenusKit; sourceTree = "<group>"; };
 		A00000000000000000000060 /* Products */ = {isa = PBXGroup; children = (A00000000000000000000020 /* NeXTMenus.app */); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
@@ -62,7 +64,7 @@
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A00000000000000000000080 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0000000000000000000000C /* MenuItem.swift in Sources */, A00000000000000000000005 /* MenuItemVisibility.swift in Sources */, A0000000000000000000000E /* MainMenuRows.swift in Sources */, A00000000000000000000001 /* NeXTMenusApp.swift in Sources */, A00000000000000000000002 /* AppDelegate.swift in Sources */, A00000000000000000000003 /* ApplicationObserver.swift in Sources */, A00000000000000000000004 /* MenuExtractor.swift in Sources */, A00000000000000000000006 /* NeXTMenusSettings.swift in Sources */, A00000000000000000000007 /* MenuWindowController.swift in Sources */, A00000000000000000000008 /* SubmenuWindowController.swift in Sources */, A00000000000000000000009 /* NonActivatingWindow.swift in Sources */, A0000000000000000000000A /* HoverTableView.swift in Sources */, A0000000000000000000000B /* CenteredLabel.swift in Sources */, A0000000000000000000000D /* NeXTMenusRendering.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
+		A00000000000000000000080 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0000000000000000000000C /* MenuItem.swift in Sources */, A00000000000000000000005 /* MenuItemVisibility.swift in Sources */, A0000000000000000000000E /* MainMenuRows.swift in Sources */, A0000000000000000000000F /* MenuHighlightPolicy.swift in Sources */, A00000000000000000000001 /* NeXTMenusApp.swift in Sources */, A00000000000000000000002 /* AppDelegate.swift in Sources */, A00000000000000000000003 /* ApplicationObserver.swift in Sources */, A00000000000000000000004 /* MenuExtractor.swift in Sources */, A00000000000000000000006 /* NeXTMenusSettings.swift in Sources */, A00000000000000000000007 /* MenuWindowController.swift in Sources */, A00000000000000000000008 /* SubmenuWindowController.swift in Sources */, A00000000000000000000009 /* NonActivatingWindow.swift in Sources */, A0000000000000000000000A /* HoverTableView.swift in Sources */, A0000000000000000000000B /* CenteredLabel.swift in Sources */, A0000000000000000000000D /* NeXTMenusRendering.swift in Sources */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */

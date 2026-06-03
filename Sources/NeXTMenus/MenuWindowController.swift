@@ -1137,53 +1137,36 @@ extension MenuWindowController: NSTableViewDelegate {
     private func updateRowHighlight(forRow row: Int) {
         guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
 
-        // Flash overrides everything else (used by trailing-action click)
-        let isHighlighted: Bool
-        if let flashState = flashState, flashState.row == row {
-            isHighlighted = flashState.on
-        } else {
-            // Only enabled, non-separator rows can be highlighted
-            let hoverable = tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false
-            if isDragging {
-                // During click-drag over main-menu rows, only the hovered row
-                // is selected. Keep the open-submenu row grey only after the
-                // pointer has left main rows, e.g. while dragging in the child.
-                let pointerIsOffMainRows = (hoveredRow ?? -1) < 0
-                isHighlighted = hoverable
-                    && (hoveredRow == row || (pointerIsOffMainRows && childSubmenuRow == row))
-            } else if trailingAction(at: row) != nil {
-                // Trailing actions (Hide / Quit) don't highlight on plain
-                // hover - only when pressed or while the menu is in
-                // click-open tracking mode.
-                isHighlighted = hoverable
-                    && hoveredRow == row
-                    && (pressedRow == row || isMenuActive)
-            } else {
-                isHighlighted = hoverable
-                    && ((childSubmenuRow == row)
-                        || (hoveredRow == row && childSubmenuRow != nil))
-            }
-        }
+        let flash = flashState.map { MenuRowFlash(row: $0.row, isOn: $0.on) }
+        let appearance = MenuHighlightPolicy.mainRowAppearance(
+            row: row,
+            isHoverable: tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
+            isTrailingAction: trailingAction(at: row) != nil,
+            hoveredRow: hoveredRow,
+            childSubmenuRow: childSubmenuRow,
+            childHasMouse: childHasMouse,
+            pressedRow: pressedRow,
+            isDragging: isDragging,
+            isMenuActive: isMenuActive,
+            flash: flash
+        )
 
         let highlightView = cellView.subviews.first {
             $0.identifier == NSUserInterfaceItemIdentifier("BackgroundView")
         }
-        highlightView?.isHidden = !isHighlighted
+        highlightView?.isHidden = !appearance.isHighlighted
         // The open-submenu row de-emphasizes (different material, not the blue
         // selection) while the pointer is down in the child submenu.
         if let effect = highlightView as? NSVisualEffectView {
-            let pointerIsOffMainRows = (hoveredRow ?? -1) < 0
-            let deEmphasizeOpenSubmenu = (childSubmenuRow == row)
-                && (childHasMouse || (isDragging && pointerIsOffMainRows))
-            effect.isEmphasized = !deEmphasizeOpenSubmenu
+            effect.isEmphasized = appearance.isEmphasized
         }
-        cellView.backgroundStyle = isHighlighted ? .emphasized : .normal
+        cellView.backgroundStyle = appearance.isHighlighted ? .emphasized : .normal
         // ShortcutView's text labels aren't covered by NSTableCellView's
         // textField propagation, so push the emphasis state to them too.
         let shortcutField = cellView.subviews.first {
             $0.identifier == NSUserInterfaceItemIdentifier("ShortcutField")
         } as? ShortcutView
-        shortcutField?.setEmphasized(isHighlighted)
+        shortcutField?.setEmphasized(appearance.isHighlighted)
     }
 
     // Handle mouse up - submenu opening is handled on mouse down
