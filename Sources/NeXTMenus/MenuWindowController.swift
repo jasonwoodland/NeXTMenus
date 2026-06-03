@@ -27,28 +27,6 @@ class MenuWindowController: NSWindowController {
     // True while the pointer is in a child submenu rather than this menu.
     private var childHasMouse = false
 
-    // Trailing actions appended after the menu bar items: Hide and Quit the
-    // target app. Source of truth for row mapping and execution.
-    private enum TrailingAction {
-        case hide, quit, logOut
-
-        var title: String {
-            switch self {
-            case .hide: return "Hide"
-            case .quit: return "Quit"
-            case .logOut: return "Log Out"
-            }
-        }
-
-        var shortcutGlyph: String {
-            switch self {
-            case .hide: return "⌘H"
-            case .quit: return "⌘Q"
-            case .logOut: return "⇧⌘Q"
-            }
-        }
-    }
-
     // Override hover/selection on a specific row while it flashes after a
     // click. Mirrors the SubmenuWindowController flash mechanism.
     private var flashState: (row: Int, on: Bool)?
@@ -87,46 +65,41 @@ class MenuWindowController: NSWindowController {
         }
 
         let appItems = appMenuItem.map { MenuExtractor.submenuItems(for: $0) } ?? []
-        let items = appItems.filter { !$0.isSeparator && $0.title == "Services" }
+        let items = MainMenuRows.promotedServicesItems(
+            from: appItems,
+            showServices: NeXTMenusSettings.showServicesInMainMenu
+        )
         promotedAppMenuItemsCache = (menuItemsVersion, items)
         return items
     }
 
-    private var visibleTrailingActions: [TrailingAction] {
-        var actions: [TrailingAction] = []
-        if NeXTMenusSettings.showHideInMainMenu { actions.append(.hide) }
-        if NeXTMenusSettings.showQuitInMainMenu {
-            actions.append(isFinderTarget ? .logOut : .quit)
-        }
-        return actions
+    private var visibleTrailingActions: [MainMenuTrailingAction] {
+        MainMenuRows.trailingActions(
+            showHide: NeXTMenusSettings.showHideInMainMenu,
+            showQuit: NeXTMenusSettings.showQuitInMainMenu,
+            isFinderTarget: isFinderTarget
+        )
     }
 
     private var isFinderTarget: Bool {
         targetApp?.bundleIdentifier == "com.apple.finder"
     }
 
-    private var firstPromotedAppMenuItemRow: Int { 1 + visibleMenuItems.count }
-    private var firstTrailingActionRow: Int { firstPromotedAppMenuItemRow + promotedAppMenuItems.count }
-
-    private func promotedAppMenuItem(at row: Int) -> MenuItem? {
-        let start = firstPromotedAppMenuItemRow
-        let promoted = promotedAppMenuItems
-        guard row >= start, row < start + promoted.count else { return nil }
-        return promoted[row - start]
+    private var mainMenuRows: MainMenuRows {
+        MainMenuRows(
+            appMenuItem: appMenuItem,
+            visibleMenuItems: visibleMenuItems,
+            promotedAppMenuItems: promotedAppMenuItems,
+            trailingActions: visibleTrailingActions
+        )
     }
 
     private func mainMenuItem(at row: Int) -> MenuItem? {
-        if row == 0 { return appMenuItem }
-        if let promoted = promotedAppMenuItem(at: row) { return promoted }
-        guard row > 0, row < firstPromotedAppMenuItemRow else { return nil }
-        return visibleMenuItems[row - 1]
+        mainMenuRows.menuItem(at: row)
     }
 
-    private func trailingAction(at row: Int) -> TrailingAction? {
-        let start = firstTrailingActionRow
-        let actions = visibleTrailingActions
-        guard row >= start, row < start + actions.count else { return nil }
-        return actions[row - start]
+    private func trailingAction(at row: Int) -> MainMenuTrailingAction? {
+        mainMenuRows.trailingAction(at: row)
     }
 
     // Track window movement completion
@@ -1016,8 +989,7 @@ class MenuWindowController: NSWindowController {
 // MARK: - NSTableViewDataSource
 extension MenuWindowController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        // 1 for "Info" + the menu bar items + promoted app-menu items + visible trailing actions
-        return 1 + visibleMenuItems.count + promotedAppMenuItems.count + visibleTrailingActions.count
+        mainMenuRows.count
     }
 }
 
@@ -1154,15 +1126,7 @@ extension MenuWindowController: NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        // Don't allow selection of disabled items or separators
-        if row == 0 {
-            return appMenuItem?.isEnabled ?? true
-        }
-        if trailingAction(at: row) != nil {
-            return true
-        }
-        guard let menuItem = mainMenuItem(at: row) else { return false }
-        return menuItem.isEnabled && !menuItem.isSeparator
+        mainMenuRows.isSelectable(row: row)
     }
 
     func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
@@ -1265,7 +1229,7 @@ extension MenuWindowController: NSTableViewDelegate {
         DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
     }
 
-    private func performTrailingAction(_ action: TrailingAction, at row: Int) {
+    private func performTrailingAction(_ action: MainMenuTrailingAction, at row: Int) {
         collapseSubmenus()
         flashRow(row) { [weak self] in
             guard let self = self else { return }
