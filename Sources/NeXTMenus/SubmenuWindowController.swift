@@ -1054,38 +1054,27 @@ class SubmenuWindowController: NSWindowController {
     // open submenu. A row of -1 means the pointer is off this menu's rows -
     // it's left open only if the pointer is over the child window itself.
     private func updateOpenSubmenu(forHoveredRow row: Int) {
-        if row < 0 {
-            // Off the menu items - leave any open submenu alone. The mouse
-            // routinely crosses deadspace while moving between parent and
-            // child windows (especially with short submenus), so we don't
-            // close here. Closing happens deliberately on sibling-hover or
-            // mouse-up.
-            return
-        }
-        if childSubmenuRow == row { return }
+        let isInBounds = row >= 0 && row < visibleMenuItems.count
+        let menuItem = isInBounds ? visibleMenuItems[row] : nil
+        let intent = MenuInteractionPolicy.submenuOpenSubmenuIntent(
+            hoveredRow: row,
+            childSubmenuRow: childSubmenuRow,
+            isDragging: isDragging,
+            isInBounds: isInBounds,
+            isSelectable: isInBounds && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false),
+            isSeparator: menuItem?.isSeparator ?? false,
+            hasSubmenu: menuItem?.hasSubmenu ?? false
+        )
 
-        // While click-dragging with a submenu already open, hovering a sibling
-        // closes the open submenu rather than switching - the drag is
-        // committed to the row that started it.
-        if isDragging, childSubmenuRow != nil {
+        switch intent {
+        case .ignore:
+            return
+        case .close:
             closeSubmenu()
             updateAllRowHighlights()
-            return
-        }
-
-        if tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
-           row < visibleMenuItems.count {
-            let menuItem = visibleMenuItems[row]
-            if !menuItem.isSeparator, menuItem.hasSubmenu {
-                presentSubmenu(for: menuItem, at: row)
-                return
-            }
-        }
-
-        // Hovered a leaf / separator / disabled row - collapse any open submenu
-        if childSubmenuRow != nil {
-            closeSubmenu()
-            updateAllRowHighlights()
+        case .present(let row):
+            guard row >= 0, row < visibleMenuItems.count else { return }
+            presentSubmenu(for: visibleMenuItems[row], at: row)
         }
     }
 

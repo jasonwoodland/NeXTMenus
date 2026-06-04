@@ -705,35 +705,28 @@ class MenuWindowController: NSWindowController {
     // pointer is off the menu items - the submenu is left open only if the
     // pointer is over the child window itself.
     private func updateOpenSubmenu(forHoveredRow row: Int) {
-        if row < 0 {
-            // Off the menu items - leave any open submenu alone. The mouse
-            // routinely crosses deadspace while moving between parent and
-            // child windows (especially with short submenus), so we don't
-            // close here. Closing happens deliberately on sibling-hover or
-            // mouse-up.
+        let isInBounds = row >= 0 && row < mainMenuRows.count
+        let menuItem = isInBounds ? mainMenuItem(at: row) : nil
+        let intent = MenuInteractionPolicy.mainOpenSubmenuIntent(
+            hoveredRow: row,
+            childSubmenuRow: childSubmenuRow,
+            isInBounds: isInBounds,
+            isSelectable: isInBounds && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false),
+            isTrailingAction: isInBounds && trailingAction(at: row) != nil,
+            isDragging: isDragging,
+            hasMenuItem: menuItem != nil,
+            isSeparator: menuItem?.isSeparator ?? false
+        )
+
+        switch intent {
+        case .ignore:
             return
+        case .collapse(let endsTracking):
+            collapseSubmenus(endsTracking: endsTracking)
+        case .showSubmenu(let row):
+            guard let menuItem = mainMenuItem(at: row) else { return }
+            showSubmenu(for: menuItem, at: row)
         }
-        if childSubmenuRow == row { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
-        // Trailing actions don't have submenus; hovering one (during a drag
-        // or with a submenu open) collapses whatever is open. Stay in
-        // tracking mode (isMenuActive) so a follow-up hover on a submenu
-        // sibling still opens it.
-        if trailingAction(at: row) != nil {
-            if childSubmenuRow != nil {
-                collapseSubmenus(endsTracking: false)
-            }
-            return
-        }
-        // While click-dragging with a submenu already open, hovering a sibling
-        // closes the open submenu rather than switching - the drag is
-        // committed to the row that started it.
-        if isDragging, childSubmenuRow != nil {
-            collapseSubmenus()
-            return
-        }
-        guard let menuItem = mainMenuItem(at: row), !menuItem.isSeparator else { return }
-        showSubmenu(for: menuItem, at: row)
     }
 
     // Expose tableView for cross-window detection
