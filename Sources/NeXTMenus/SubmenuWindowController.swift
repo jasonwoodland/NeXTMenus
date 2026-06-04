@@ -168,12 +168,14 @@ class SubmenuWindowController: NSWindowController {
         isDragging = false
         childHasMouse = false
         flashState = nil
+        pressedOpenSubmenuRow = nil
     }
 
     // State management for menu interactions
     private var hoveredRow: Int? // Currently highlighted row (visual only)
     private var isDragging: Bool = false // True while a click-drag is in progress
     private var suppressRowTrackingUntilMouseUp = false
+    private var pressedOpenSubmenuRow: Int?
 
     // While an action row is flashing, this overrides hover/submenu highlight
     // for that row so the blink can't be stomped by stray hover events.
@@ -351,6 +353,7 @@ class SubmenuWindowController: NSWindowController {
                 // doesn't also treat the release as outside itself and collapse
                 // the submenu before the child can flash/perform its action.
                 childController.handleMouseUpFromParent(at: childRow)
+                self.pressedOpenSubmenuRow = nil
                 self.isDragging = false
                 self.hoveredRow = nil
                 self.updateAllRowHighlights()
@@ -980,6 +983,7 @@ class SubmenuWindowController: NSWindowController {
     private func handleMouseDown(_ row: Int) {
         guard !suppressRowTrackingUntilMouseUp else { return }
         guard !clearHoverForScrollCaretIfNeeded() else { return }
+        pressedOpenSubmenuRow = nil
 
         // A click raises this window above its open submenu; re-assert the
         // chain on top afterwards so the submenu stays focused/visible.
@@ -989,14 +993,25 @@ class SubmenuWindowController: NSWindowController {
         guard row >= 0 && row < visibleMenuItems.count else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
+        let menuItem = visibleMenuItems[row]
+        if menuItem.hasSubmenu, childSubmenuRow == row {
+            pressedOpenSubmenuRow = row
+            if isTornOff {
+                hoveredRow = row
+                isDragging = true
+                updateAllRowHighlights()
+            }
+            return
+        }
+
         if isTornOff {
             hoveredRow = row
             isDragging = true
             updateAllRowHighlights()
         }
 
-        // Open (or toggle) the submenu on press; leaf items act on mouse up
-        if visibleMenuItems[row].hasSubmenu {
+        // Open the submenu on press; leaf items act on mouse up
+        if menuItem.hasSubmenu {
             handleMouseClickedRow(row)
         }
     }
@@ -1103,6 +1118,7 @@ class SubmenuWindowController: NSWindowController {
     }
 
     private func closeSubmenu() {
+        pressedOpenSubmenuRow = nil
         childSubmenuController?.hideWindow(animated: false)
         childSubmenuController = nil
         childSubmenuRow = nil
@@ -1187,6 +1203,7 @@ class SubmenuWindowController: NSWindowController {
         self.parentMenuItem = parentMenuItem
         self.hoveredRow = nil
         self.isDragging = false
+        self.pressedOpenSubmenuRow = nil
         self.windowWidth = Self.computeContentWidth(for: menuItems)
 
         submenuWindow.title = title
@@ -1428,6 +1445,7 @@ class SubmenuWindowController: NSWindowController {
         childSubmenuController = nil
         childSubmenuRow = nil
         hoveredRow = nil
+        pressedOpenSubmenuRow = nil
 
         if animated {
             // Fade out, then order out. The strong self capture keeps the
@@ -1687,13 +1705,10 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
         let menuItem = visibleMenuItems[row]
 
-        // Clicking the item whose submenu is already open: a torn-off menu
-        // toggles it closed; an attached submenu leaves it open.
+        // Clicking the item whose submenu is already open is handled by the
+        // mouse-up path. Attached submenus no-op; torn-off submenus close on
+        // release so the press itself does not flicker the child closed/open.
         if childSubmenuRow == row {
-            if isTornOff {
-                closeSubmenu()
-                updateAllRowHighlights()
-            }
             return
         }
 
@@ -1708,6 +1723,8 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
     // Handle mouse up - execute leaf actions; submenus open on mouse down
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
+        let pressedOpenSubmenuRow = pressedOpenSubmenuRow
+        self.pressedOpenSubmenuRow = nil
         if clearHoverForScrollCaretIfNeeded() { return }
         isDragging = false
         // A click can also raise this window on mouse-up; keep the chain on top
@@ -1740,16 +1757,26 @@ extension SubmenuWindowController: NSTableViewDelegate {
         }
 
         let menuItem = visibleMenuItems[row]
-        guard let element = menuItem.element else { return }
 
-        // A click-drag released on a submenu item closes that submenu
         if menuItem.hasSubmenu {
+            if pressedOpenSubmenuRow == row, childSubmenuRow == row {
+                if isTornOff {
+                    closeSubmenu()
+                    hoveredRow = nil
+                    updateAllRowHighlights()
+                }
+                return
+            }
+
+            // A click-drag released on a submenu item closes that submenu
             if wasDragged, childSubmenuRow == row {
                 closeSubmenu()
                 updateAllRowHighlights()
             }
             return
         }
+
+        guard let element = menuItem.element else { return }
 
         if isTornOff {
             hoveredRow = nil
@@ -1785,90 +1812,9 @@ extension SubmenuWindowController: NSTableViewDelegate {
         let selectedRow = tableView.selectedRow
         guard selectedRow >= 0 else { return }
 
-        // Deselect immediately for button-like behavior
+        // HoverTableView owns mouse-driven submenu/action behavior. Keep this
+        // delegate path defensive only so an incidental selection cannot race
+        // the mouse handlers and briefly close/reopen an already-open submenu.
         tableView.deselectRow(selectedRow)
-
-        guard selectedRow < visibleMenuItems.count else { return }
-        let menuItem = visibleMenuItems[selectedRow]
-
-        // Check if clicking on the same item that's already open - toggle it closed
-        if let existingChild = childSubmenuController, childSubmenuRow == selectedRow {
-            existingChild.hideWindow()
-            childSubmenuController = nil
-            childSubmenuRow = nil
-
-            // Update all row highlights
-            for i in 0..<tableView.numberOfRows {
-                updateRowHighlight(forRow: i)
-            }
-            return
-        }
-
-        // Use the pre-extracted submenu tree (falls back to on-demand)
-        if menuItem.hasSubmenu {
-            let submenuItems = MenuExtractor.submenuItems(for: menuItem)
-
-            if !submenuItems.isEmpty {
-                // Close any existing child submenu
-                childSubmenuController?.hideWindow()
-
-                // Create and show new child submenu
-                childSubmenuController = SubmenuWindowController(
-                    title: menuItem.title,
-                    menuItems: submenuItems,
-                    targetApp: targetApp,
-                    parentMenuItem: menuItem
-                )
-                childSubmenuController?.showWindow(rightOf: submenuWindow, alignedToRow: selectedRow)
-                childSubmenuRow = selectedRow
-
-                // Update all row highlights
-                for i in 0..<tableView.numberOfRows {
-                    updateRowHighlight(forRow: i)
-                }
-            } else {
-                // No submenu - this is an action item, execute it
-                if let element = menuItem.element {
-                    // Activate the target application first so the action executes in the right context
-                    targetApp?.activate(options: [])
-
-                    // Small delay to ensure activation completes
-                    usleep(50000) // 50ms
-
-                    AXUIElementPerformAction(element, kAXPressAction as CFString)
-                }
-
-                // Close any open child submenu
-                childSubmenuController?.hideWindow()
-                childSubmenuController = nil
-                childSubmenuRow = nil
-
-                // Update all row highlights
-                for i in 0..<tableView.numberOfRows {
-                    updateRowHighlight(forRow: i)
-                }
-            }
-        } else {
-            // No submenu - this is an action item, execute it
-            if let element = menuItem.element {
-                // Activate the target application first so the action executes in the right context
-                targetApp?.activate(options: [])
-
-                // Small delay to ensure activation completes
-                usleep(50000) // 50ms
-
-                AXUIElementPerformAction(element, kAXPressAction as CFString)
-            }
-
-            // Close any open child submenu
-            childSubmenuController?.hideWindow()
-            childSubmenuController = nil
-            childSubmenuRow = nil
-
-            // Update all row highlights
-            for i in 0..<tableView.numberOfRows {
-                updateRowHighlight(forRow: i)
-            }
-        }
     }
 }
