@@ -166,6 +166,186 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainMouseUpTrailingActionPerformsBeforeOtherBranches() {
+        XCTAssertEqual(mainMouseUp(releasedRow: 9, hasTrailingAction: true), .performTrailingAction(row: 9))
+    }
+
+    func testMainMouseUpOffRowCollapsesWhenChildOpen() {
+        XCTAssertEqual(mainMouseUp(releasedRow: -1, childSubmenuRow: 2), .collapseAndClearHover)
+    }
+
+    func testMainMouseUpOffRowDeactivatesWhenNoChildOpen() {
+        XCTAssertEqual(mainMouseUp(releasedRow: -1), .deactivateAndClearHover)
+    }
+
+    func testMainMouseUpNonSelectableOrHighOutOfBoundsCollapses() {
+        XCTAssertEqual(mainMouseUp(releasedRow: 3, isSelectable: false), .collapseAndClearHover)
+        XCTAssertEqual(mainMouseUp(releasedRow: 99, isSelectable: false), .collapseAndClearHover)
+    }
+
+    func testMainMouseUpMatchingDetachedCopyHidesAttachedCopy() {
+        XCTAssertEqual(
+            mainMouseUp(
+                releasedRow: 3,
+                pressedDetachedSubmenuRow: 3,
+                childSubmenuRow: 3
+            ),
+            .hideAttachedCopy
+        )
+    }
+
+    func testMainMouseUpDetachedCopyDoesNotHideForDragOrMismatch() {
+        XCTAssertEqual(
+            mainMouseUp(
+                releasedRow: 3,
+                pressedDetachedSubmenuRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: true
+            ),
+            .keepOpenAndRaiseChain
+        )
+        XCTAssertEqual(
+            mainMouseUp(
+                releasedRow: 4,
+                pressedDetachedSubmenuRow: 3,
+                childSubmenuRow: 3
+            ),
+            .keepOpenAndRaiseChain
+        )
+        XCTAssertEqual(
+            mainMouseUp(
+                releasedRow: 3,
+                pressedDetachedSubmenuRow: 3,
+                childSubmenuRow: 4
+            ),
+            .keepOpenAndRaiseChain
+        )
+    }
+
+    func testMainMouseUpToggleCloseOnlyForMatchingUndraggedOpenPress() {
+        XCTAssertEqual(
+            mainMouseUp(releasedRow: 3, pressedRow: 3, pressedRowWasOpen: true),
+            .toggleClose
+        )
+        XCTAssertEqual(
+            mainMouseUp(releasedRow: 3, pressedRow: 3, pressedRowWasOpen: true, wasDragged: true),
+            .keepOpenAndRaiseChain
+        )
+        XCTAssertEqual(
+            mainMouseUp(releasedRow: 4, pressedRow: 3, pressedRowWasOpen: true),
+            .keepOpenAndRaiseChain
+        )
+    }
+
+    func testMainMouseUpNormalReleaseKeepsOpenAndRaisesChain() {
+        XCTAssertEqual(mainMouseUp(releasedRow: 3), .keepOpenAndRaiseChain)
+    }
+
+    func testSubmenuMouseUpOffRowAttachedDismissesChain() {
+        XCTAssertEqual(submenuMouseUp(releasedRow: -1, isTornOff: false), .closeChildClearHoverAndDismissChain)
+    }
+
+    func testSubmenuMouseUpOffRowTornOffKeepsChainVisible() {
+        XCTAssertEqual(submenuMouseUp(releasedRow: -1, isTornOff: true), .closeChildClearHover)
+    }
+
+    func testSubmenuMouseUpHighOutOfBoundsIgnores() {
+        XCTAssertEqual(submenuMouseUp(releasedRow: 99, isInBounds: false), .ignore)
+    }
+
+    func testSubmenuMouseUpNonSelectableAttachedDismissesChain() {
+        XCTAssertEqual(
+            submenuMouseUp(releasedRow: 3, isTornOff: false, isSelectable: false),
+            .closeChildClearHoverAndDismissChain
+        )
+    }
+
+    func testSubmenuMouseUpNonSelectableTornOffKeepsChainVisible() {
+        XCTAssertEqual(
+            submenuMouseUp(releasedRow: 3, isTornOff: true, isSelectable: false),
+            .closeChildClearHover
+        )
+    }
+
+    func testSubmenuMouseUpMatchingDetachedCopyHidesAttachedCopy() {
+        XCTAssertEqual(
+            submenuMouseUp(
+                releasedRow: 3,
+                pressedDetachedSubmenuRow: 3,
+                childSubmenuRow: 3,
+                hasSubmenu: true
+            ),
+            .hideAttachedCopy
+        )
+    }
+
+    func testSubmenuMouseUpPressedOpenChildTakesPrecedenceOverDraggedRelease() {
+        XCTAssertEqual(
+            submenuMouseUp(
+                releasedRow: 3,
+                pressedOpenSubmenuRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: true,
+                isTornOff: false,
+                hasSubmenu: true
+            ),
+            .keepAttachedOpenChild
+        )
+        XCTAssertEqual(
+            submenuMouseUp(
+                releasedRow: 3,
+                pressedOpenSubmenuRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: true,
+                isTornOff: true,
+                hasSubmenu: true
+            ),
+            .closeTornOffOpenChild
+        )
+    }
+
+    func testSubmenuMouseUpDraggedReleaseOnOpenChildClosesWithoutPressedOpenMatch() {
+        XCTAssertEqual(
+            submenuMouseUp(
+                releasedRow: 3,
+                pressedOpenSubmenuRow: nil,
+                childSubmenuRow: 3,
+                wasDragged: true,
+                hasSubmenu: true
+            ),
+            .closeDraggedOpenChild
+        )
+        XCTAssertEqual(
+            submenuMouseUp(
+                releasedRow: 3,
+                pressedOpenSubmenuRow: 2,
+                childSubmenuRow: 3,
+                wasDragged: true,
+                hasSubmenu: true
+            ),
+            .closeDraggedOpenChild
+        )
+    }
+
+    func testSubmenuMouseUpSubmenuCapableRowOtherwiseIgnores() {
+        XCTAssertEqual(submenuMouseUp(releasedRow: 3, hasSubmenu: true), .ignore)
+    }
+
+    func testSubmenuMouseUpLeafWithoutElementIgnores() {
+        XCTAssertEqual(submenuMouseUp(releasedRow: 3, hasSubmenu: false, hasElement: false), .ignore)
+    }
+
+    func testSubmenuMouseUpLeafWithElementPerformsAction() {
+        XCTAssertEqual(
+            submenuMouseUp(releasedRow: 3, isTornOff: false, hasSubmenu: false, hasElement: true),
+            .performLeafAction(clearHover: false)
+        )
+        XCTAssertEqual(
+            submenuMouseUp(releasedRow: 3, isTornOff: true, hasSubmenu: false, hasElement: true),
+            .performLeafAction(clearHover: true)
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,
@@ -205,6 +385,54 @@ final class MenuInteractionStateTests: XCTestCase {
             isSelectable: isSelectable,
             isSeparator: isSeparator,
             hasSubmenu: hasSubmenu
+        )
+    }
+
+    private func mainMouseUp(
+        releasedRow: Int,
+        pressedRow: Int? = nil,
+        pressedRowWasOpen: Bool = false,
+        pressedDetachedSubmenuRow: Int? = nil,
+        childSubmenuRow: Int? = nil,
+        wasDragged: Bool = false,
+        isSelectable: Bool = true,
+        hasTrailingAction: Bool = false
+    ) -> MainMouseUpIntent {
+        MenuInteractionPolicy.mainMouseUpIntent(
+            releasedRow: releasedRow,
+            pressedRow: pressedRow,
+            pressedRowWasOpen: pressedRowWasOpen,
+            pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged,
+            isSelectable: isSelectable,
+            hasTrailingAction: hasTrailingAction
+        )
+    }
+
+    private func submenuMouseUp(
+        releasedRow: Int,
+        pressedOpenSubmenuRow: Int? = nil,
+        pressedDetachedSubmenuRow: Int? = nil,
+        childSubmenuRow: Int? = nil,
+        wasDragged: Bool = false,
+        isTornOff: Bool = false,
+        isInBounds: Bool = true,
+        isSelectable: Bool = true,
+        hasSubmenu: Bool = false,
+        hasElement: Bool = false
+    ) -> SubmenuMouseUpIntent {
+        MenuInteractionPolicy.submenuMouseUpIntent(
+            releasedRow: releasedRow,
+            pressedOpenSubmenuRow: pressedOpenSubmenuRow,
+            pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged,
+            isTornOff: isTornOff,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            hasSubmenu: hasSubmenu,
+            hasElement: hasElement
         )
     }
 }

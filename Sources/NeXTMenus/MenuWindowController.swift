@@ -1233,50 +1233,42 @@ extension MenuWindowController: NSTableViewDelegate {
         pressedRow = nil
         pressedRowWasOpen = false
         pressedDetachedSubmenuRow = nil
-        // Trailing actions (Hide / Quit) fire on release, with a flash
-        if let action = trailingAction(at: row) {
-            performTrailingAction(action, at: row)
-            return
-        }
-        // Released off any menu item or outside the menu window - clear hover
-        // and collapse any open submenu.
-        if row < 0 {
-            hoveredRow = nil
-            if childSubmenuRow != nil {
-                collapseSubmenus()
-            } else {
-                isMenuActive = false
-                updateAllRowHighlights()
-            }
-            return
-        }
-        if !(tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false) {
-            hoveredRow = nil
-            collapseSubmenus()
-            return
-        }
-        if MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
-            pressedDetachedSubmenuRow: wasPressedDetachedSubmenuRow,
-            releasedRow: row,
-            childSubmenuRow: childSubmenuRow,
-            wasDragged: wasDragged
-        ) {
-            collapseSubmenus()
-            return
-        }
 
-        // Toggle-close: a click (no drag) on a row that was already showing
-        // its submenu at mousedown closes the chain on release - matches the
-        // native menu bar behavior of mouseup, not mousedown, doing the work.
-        if !wasDragged, wasPressedRowWasOpen, wasPressedRow == row {
+        let trailingAction = trailingAction(at: row)
+        let isSelectable = trailingAction == nil
+            && row >= 0
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let intent = MenuInteractionPolicy.mainMouseUpIntent(
+            releasedRow: row,
+            pressedRow: wasPressedRow,
+            pressedRowWasOpen: wasPressedRowWasOpen,
+            pressedDetachedSubmenuRow: wasPressedDetachedSubmenuRow,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged,
+            isSelectable: isSelectable,
+            hasTrailingAction: trailingAction != nil
+        )
+
+        switch intent {
+        case .performTrailingAction(let row):
+            guard let trailingAction else { return }
+            performTrailingAction(trailingAction, at: row)
+        case .collapseAndClearHover:
+            hoveredRow = nil
             collapseSubmenus()
-            return
+        case .deactivateAndClearHover:
+            hoveredRow = nil
+            isMenuActive = false
+            updateAllRowHighlights()
+        case .hideAttachedCopy, .toggleClose:
+            collapseSubmenus()
+        case .keepOpenAndRaiseChain:
+            // Click-drag-and-release on a main menu item triggers it: submenu
+            // parents stay open in tracking mode (don't close the chain), and
+            // the trailing-action branch above already handles Hide / Quit.
+            // A click can also raise this window on mouse-up; keep the chain on top
+            DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
-        // Click-drag-and-release on a main menu item triggers it: submenu
-        // parents stay open in tracking mode (don't close the chain), and
-        // the trailing-action branch above already handles Hide / Quit.
-        // A click can also raise this window on mouse-up; keep the chain on top
-        DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
     }
 
     private func performTrailingAction(_ action: MainMenuTrailingAction, at row: Int) {

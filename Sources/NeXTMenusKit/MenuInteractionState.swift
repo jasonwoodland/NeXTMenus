@@ -12,6 +12,26 @@ public enum SubmenuOpenSubmenuIntent: Equatable {
     case present(row: Int)
 }
 
+public enum MainMouseUpIntent: Equatable {
+    case performTrailingAction(row: Int)
+    case collapseAndClearHover
+    case deactivateAndClearHover
+    case hideAttachedCopy
+    case toggleClose
+    case keepOpenAndRaiseChain
+}
+
+public enum SubmenuMouseUpIntent: Equatable {
+    case closeChildClearHoverAndDismissChain
+    case closeChildClearHover
+    case ignore
+    case hideAttachedCopy
+    case closeTornOffOpenChild
+    case keepAttachedOpenChild
+    case closeDraggedOpenChild
+    case performLeafAction(clearHover: Bool)
+}
+
 public enum MenuInteractionPolicy {
     public static func mainOpenSubmenuIntent(
         hoveredRow: Int,
@@ -63,6 +83,89 @@ public enum MenuInteractionPolicy {
 
         guard childSubmenuRow != nil else { return .ignore }
         return .close
+    }
+
+    public static func mainMouseUpIntent(
+        releasedRow: Int,
+        pressedRow: Int?,
+        pressedRowWasOpen: Bool,
+        pressedDetachedSubmenuRow: Int?,
+        childSubmenuRow: Int?,
+        wasDragged: Bool,
+        isSelectable: Bool,
+        hasTrailingAction: Bool
+    ) -> MainMouseUpIntent {
+        if hasTrailingAction {
+            return .performTrailingAction(row: releasedRow)
+        }
+
+        guard releasedRow >= 0 else {
+            return childSubmenuRow == nil ? .deactivateAndClearHover : .collapseAndClearHover
+        }
+
+        guard isSelectable else { return .collapseAndClearHover }
+
+        if shouldHideAttachedCopyOnMouseUp(
+            pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+            releasedRow: releasedRow,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged
+        ) {
+            return .hideAttachedCopy
+        }
+
+        if !wasDragged, pressedRowWasOpen, pressedRow == releasedRow {
+            return .toggleClose
+        }
+
+        return .keepOpenAndRaiseChain
+    }
+
+    public static func submenuMouseUpIntent(
+        releasedRow: Int,
+        pressedOpenSubmenuRow: Int?,
+        pressedDetachedSubmenuRow: Int?,
+        childSubmenuRow: Int?,
+        wasDragged: Bool,
+        isTornOff: Bool,
+        isInBounds: Bool,
+        isSelectable: Bool,
+        hasSubmenu: Bool,
+        hasElement: Bool
+    ) -> SubmenuMouseUpIntent {
+        guard releasedRow >= 0 else {
+            return isTornOff ? .closeChildClearHover : .closeChildClearHoverAndDismissChain
+        }
+
+        guard isInBounds else { return .ignore }
+
+        guard isSelectable else {
+            return isTornOff ? .closeChildClearHover : .closeChildClearHoverAndDismissChain
+        }
+
+        if hasSubmenu {
+            if shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+                releasedRow: releasedRow,
+                childSubmenuRow: childSubmenuRow,
+                wasDragged: wasDragged
+            ) {
+                return .hideAttachedCopy
+            }
+
+            if pressedOpenSubmenuRow == releasedRow, childSubmenuRow == releasedRow {
+                return isTornOff ? .closeTornOffOpenChild : .keepAttachedOpenChild
+            }
+
+            if wasDragged, childSubmenuRow == releasedRow {
+                return .closeDraggedOpenChild
+            }
+
+            return .ignore
+        }
+
+        guard hasElement else { return .ignore }
+        return .performLeafAction(clearHover: isTornOff)
     }
 
     public static func shouldHideAttachedCopyOnMouseUp(

@@ -1827,72 +1827,60 @@ extension SubmenuWindowController: NSTableViewDelegate {
         defer {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
-        // Released off any menu item or outside the menu window - cancel the
-        // whole attached tracking chain so later hover does not keep opening
-        // submenus without a fresh mouse-down. Torn-off menus stay visible.
-        if row < 0 {
+
+        let isInBounds = row >= 0 && row < visibleMenuItems.count
+        let isSelectable = isInBounds
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isInBounds ? visibleMenuItems[row] : nil
+        let intent = MenuInteractionPolicy.submenuMouseUpIntent(
+            releasedRow: row,
+            pressedOpenSubmenuRow: pressedOpenSubmenuRow,
+            pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged,
+            isTornOff: isTornOff,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            hasSubmenu: menuItem?.hasSubmenu ?? false,
+            hasElement: menuItem?.element != nil
+        )
+
+        switch intent {
+        case .closeChildClearHoverAndDismissChain:
             hoveredRow = nil
             closeSubmenu()
             updateAllRowHighlights()
-            if isTornOff {
-                isDragging = false
-            } else {
-                dismissChain?()
-            }
-            return
-        }
-        guard row < visibleMenuItems.count else { return }
-        if !(tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false) {
+            dismissChain?()
+        case .closeChildClearHover:
             hoveredRow = nil
             closeSubmenu()
             updateAllRowHighlights()
-            if !isTornOff {
-                dismissChain?()
-            }
+        case .ignore:
             return
-        }
-
-        let menuItem = visibleMenuItems[row]
-
-        if menuItem.hasSubmenu {
-            if MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
-                pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
-                releasedRow: row,
-                childSubmenuRow: childSubmenuRow,
-                wasDragged: wasDragged
-            ) {
-                closeSubmenu()
+        case .hideAttachedCopy:
+            closeSubmenu()
+            hoveredRow = nil
+            updateAllRowHighlights()
+        case .closeTornOffOpenChild:
+            closeSubmenu()
+            hoveredRow = nil
+            updateAllRowHighlights()
+        case .keepAttachedOpenChild:
+            return
+        case .closeDraggedOpenChild:
+            // A click-drag released on a submenu item closes that submenu.
+            closeSubmenu()
+            updateAllRowHighlights()
+        case .performLeafAction(let clearHover):
+            guard let element = menuItem?.element else { return }
+            if clearHover {
                 hoveredRow = nil
                 updateAllRowHighlights()
-                return
             }
 
-            if pressedOpenSubmenuRow == row, childSubmenuRow == row {
-                if isTornOff {
-                    closeSubmenu()
-                    hoveredRow = nil
-                    updateAllRowHighlights()
-                }
-                return
-            }
-
-            // A click-drag released on a submenu item closes that submenu
-            if wasDragged, childSubmenuRow == row {
-                closeSubmenu()
-                updateAllRowHighlights()
-            }
-            return
+            // Leaf item - flash, perform the action, collapse the chain
+            performAction(element, at: row)
         }
-
-        guard let element = menuItem.element else { return }
-
-        if isTornOff {
-            hoveredRow = nil
-            updateAllRowHighlights()
-        }
-
-        // Leaf item - flash, perform the action, collapse the chain
-        performAction(element, at: row)
     }
 
     // Handle long press release - a slow click is still a click. Route
