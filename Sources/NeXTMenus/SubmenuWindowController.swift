@@ -129,6 +129,7 @@ class SubmenuWindowController: NSWindowController {
     private var initialWindowFrame: NSRect = .zero
     private var isProgrammaticMove: Bool = false
     private var moveDetectionTimer: Timer?
+    private var pendingTornOffPresentation = false
 
     // Track child submenu window
     private var childSubmenuController: SubmenuWindowController?
@@ -371,6 +372,9 @@ class SubmenuWindowController: NSWindowController {
                 self.updateAllRowHighlights()
             } else if event.type == .leftMouseUp {
                 self.suppressRowTrackingUntilMouseUp = false
+                if self.pendingTornOffPresentation {
+                    self.applyTornOffPresentation()
+                }
             }
 
             let mouseLocation = NSEvent.mouseLocation
@@ -477,12 +481,19 @@ class SubmenuWindowController: NSWindowController {
         guard isTornOff, !userClosed else { return }
         let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if frontPid == targetApp?.processIdentifier {
-            submenuWindow.level = Self.tornOffWindowLevel
+            applyTornOffPresentation()
             submenuWindow.orderFrontRegardless()
         } else {
             hideTransientAttachedChildChain()
             submenuWindow.orderOut(nil)
         }
+    }
+
+    private func applyTornOffPresentation() {
+        guard isTornOff else { return }
+        pendingTornOffPresentation = false
+        submenuWindow.level = Self.tornOffWindowLevel
+        submenuWindow.standardWindowButton(.closeButton)?.isHidden = false
     }
 
     private func hideTransientAttachedChildChain() {
@@ -610,9 +621,10 @@ class SubmenuWindowController: NSWindowController {
                 moveDetectionTimer?.invalidate()
                 moveDetectionTimer = nil
                 isTornOff = true
-                submenuWindow.level = Self.tornOffWindowLevel
-                // Show close button for torn off windows
-                submenuWindow.standardWindowButton(.closeButton)?.isHidden = false
+                // Defer window-level/button changes until mouse-up. Applying
+                // those presentation changes during AppKit's live window drag
+                // can cause visible vertical position jumps.
+                pendingTornOffPresentation = true
                 // Hover no longer selects once torn off - clear any stale
                 // highlight immediately.
                 hoveredRow = nil
