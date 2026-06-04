@@ -1389,29 +1389,42 @@ extension MenuWindowController: NSTableViewDelegate {
         asyncSubmenuOpenGeneration += 1
         let generation = asyncSubmenuOpenGeneration
 
-        guard row >= 0 else { return }
+        let shouldInspectRow = row >= 0 && childSubmenuRow != row
+        let isSelectable = shouldInspectRow
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isSelectable ? mainMenuItem(at: row) : nil
+        let intent = MenuInteractionPolicy.mainAsyncDragSubmenuIntent(
+            row: row,
+            childSubmenuRow: childSubmenuRow,
+            isSelectable: isSelectable,
+            hasMenuItem: menuItem != nil,
+            isSeparator: menuItem?.isSeparator ?? false,
+            hasSubmenu: menuItem?.hasSubmenu ?? false
+        )
 
-        guard childSubmenuRow != row,
-              tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false,
-              let menuItem = mainMenuItem(at: row),
-              !menuItem.isSeparator,
-              menuItem.hasSubmenu else {
-            if let childSubmenuRow, childSubmenuRow != row {
-                collapseSubmenus(endsTracking: false)
-                hoveredRow = row
-                isDragging = true
-                updateAllRowHighlights()
-            }
+        switch intent {
+        case .ignore:
             return
-        }
-
-        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let submenuItems = MenuExtractor.submenuItems(for: menuItem)
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                guard self.asyncSubmenuOpenGeneration == generation else { return }
-                guard self.isDragging, self.hoveredRow == row else { return }
-                self.showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: nil)
+        case .collapseCurrentChildPreservingTracking(let row):
+            collapseSubmenus(endsTracking: false)
+            hoveredRow = row
+            isDragging = true
+            updateAllRowHighlights()
+        case .startAsyncOpen(let row):
+            guard let menuItem else { return }
+            DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+                let submenuItems = MenuExtractor.submenuItems(for: menuItem)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    guard MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                        requestedGeneration: generation,
+                        currentGeneration: self.asyncSubmenuOpenGeneration,
+                        isDragging: self.isDragging,
+                        hoveredRow: self.hoveredRow,
+                        requestedRow: row
+                    ) else { return }
+                    self.showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: nil)
+                }
             }
         }
     }

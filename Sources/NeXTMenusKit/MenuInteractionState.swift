@@ -12,6 +12,12 @@ public enum SubmenuOpenSubmenuIntent: Equatable {
     case present(row: Int)
 }
 
+public enum MainAsyncDragSubmenuIntent: Equatable {
+    case ignore
+    case startAsyncOpen(row: Int)
+    case collapseCurrentChildPreservingTracking(row: Int)
+}
+
 public enum MainMouseUpIntent: Equatable {
     case performTrailingAction(row: Int)
     case collapseAndClearHover
@@ -267,6 +273,37 @@ public enum MenuInteractionPolicy {
                 clearFlash: false
             )
         }
+    }
+
+    public static func mainAsyncDragSubmenuIntent(
+        row: Int,
+        childSubmenuRow: Int?,
+        isSelectable: Bool,
+        hasMenuItem: Bool,
+        isSeparator: Bool,
+        hasSubmenu: Bool
+    ) -> MainAsyncDragSubmenuIntent {
+        guard row >= 0 else { return .ignore }
+        if childSubmenuRow == row { return .ignore }
+
+        if isSelectable, hasMenuItem, !isSeparator, hasSubmenu {
+            return .startAsyncOpen(row: row)
+        }
+
+        guard childSubmenuRow != nil else { return .ignore }
+        return .collapseCurrentChildPreservingTracking(row: row)
+    }
+
+    public static func shouldPresentMainAsyncDragSubmenu(
+        requestedGeneration: Int,
+        currentGeneration: Int,
+        isDragging: Bool,
+        hoveredRow: Int?,
+        requestedRow: Int
+    ) -> Bool {
+        requestedGeneration == currentGeneration
+            && isDragging
+            && hoveredRow == requestedRow
     }
 
     public static func mainMouseDownDecision(

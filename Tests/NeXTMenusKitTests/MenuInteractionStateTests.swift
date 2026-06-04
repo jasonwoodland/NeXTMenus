@@ -701,6 +701,121 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainAsyncDragSubmenuIntentOffRowIgnoresAndLetsControllerCancelPendingOpen() {
+        XCTAssertEqual(mainAsyncDrag(row: -1, childSubmenuRow: 2), .ignore)
+    }
+
+    func testMainAsyncDragSubmenuIntentAlreadyOpenRowIgnoresBeforeInvalidFacts() {
+        XCTAssertEqual(mainAsyncDrag(row: 2, childSubmenuRow: 2), .ignore)
+        XCTAssertEqual(
+            mainAsyncDrag(
+                row: 2,
+                childSubmenuRow: 2,
+                isSelectable: false,
+                hasMenuItem: false,
+                isSeparator: true,
+                hasSubmenu: false
+            ),
+            .ignore
+        )
+    }
+
+    func testMainAsyncDragSubmenuIntentValidSubmenuStartsAsyncOpen() {
+        XCTAssertEqual(mainAsyncDrag(row: 3), .startAsyncOpen(row: 3))
+    }
+
+    func testMainAsyncDragSubmenuIntentValidSiblingStartsAsyncOpenWithoutPreCollapse() {
+        XCTAssertEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2),
+            .startAsyncOpen(row: 3)
+        )
+    }
+
+    func testMainAsyncDragSubmenuIntentInvalidRowsWithDifferentOpenChildCollapsePreservingTracking() {
+        XCTAssertEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2, isSelectable: false),
+            .collapseCurrentChildPreservingTracking(row: 3)
+        )
+        XCTAssertEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2, hasMenuItem: false),
+            .collapseCurrentChildPreservingTracking(row: 3)
+        )
+        XCTAssertEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2, isSeparator: true),
+            .collapseCurrentChildPreservingTracking(row: 3)
+        )
+        XCTAssertEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2, hasSubmenu: false),
+            .collapseCurrentChildPreservingTracking(row: 3)
+        )
+    }
+
+    func testMainAsyncDragSubmenuIntentInvalidRowsWithoutOpenChildIgnore() {
+        XCTAssertEqual(mainAsyncDrag(row: 3, isSelectable: false), .ignore)
+        XCTAssertEqual(mainAsyncDrag(row: 3, hasMenuItem: false), .ignore)
+        XCTAssertEqual(mainAsyncDrag(row: 3, isSeparator: true), .ignore)
+        XCTAssertEqual(mainAsyncDrag(row: 3, hasSubmenu: false), .ignore)
+    }
+
+    func testMainAsyncDragSubmenuIntentLeafRowsNeverStartFallbackAction() {
+        XCTAssertNotEqual(mainAsyncDrag(row: 3, hasSubmenu: false), .startAsyncOpen(row: 3))
+        XCTAssertNotEqual(
+            mainAsyncDrag(row: 3, childSubmenuRow: 2, hasSubmenu: false),
+            .startAsyncOpen(row: 3)
+        )
+    }
+
+    func testMainAsyncDragCompletionAcceptsMatchingLiveState() {
+        XCTAssertTrue(
+            MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                requestedGeneration: 7,
+                currentGeneration: 7,
+                isDragging: true,
+                hoveredRow: 3,
+                requestedRow: 3
+            )
+        )
+    }
+
+    func testMainAsyncDragCompletionRejectsStaleGenerationEndedDragAndMovedHover() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                requestedGeneration: 7,
+                currentGeneration: 8,
+                isDragging: true,
+                hoveredRow: 3,
+                requestedRow: 3
+            )
+        )
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                requestedGeneration: 7,
+                currentGeneration: 7,
+                isDragging: false,
+                hoveredRow: 3,
+                requestedRow: 3
+            )
+        )
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                requestedGeneration: 7,
+                currentGeneration: 7,
+                isDragging: true,
+                hoveredRow: 4,
+                requestedRow: 3
+            )
+        )
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
+                requestedGeneration: 7,
+                currentGeneration: 7,
+                isDragging: true,
+                hoveredRow: nil,
+                requestedRow: 3
+            )
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,
@@ -738,6 +853,24 @@ final class MenuInteractionStateTests: XCTestCase {
             isDragging: isDragging,
             isInBounds: isInBounds,
             isSelectable: isSelectable,
+            isSeparator: isSeparator,
+            hasSubmenu: hasSubmenu
+        )
+    }
+
+    private func mainAsyncDrag(
+        row: Int,
+        childSubmenuRow: Int? = nil,
+        isSelectable: Bool = true,
+        hasMenuItem: Bool = true,
+        isSeparator: Bool = false,
+        hasSubmenu: Bool = true
+    ) -> MainAsyncDragSubmenuIntent {
+        MenuInteractionPolicy.mainAsyncDragSubmenuIntent(
+            row: row,
+            childSubmenuRow: childSubmenuRow,
+            isSelectable: isSelectable,
+            hasMenuItem: hasMenuItem,
             isSeparator: isSeparator,
             hasSubmenu: hasSubmenu
         )
