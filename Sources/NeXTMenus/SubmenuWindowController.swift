@@ -113,6 +113,8 @@ class SubmenuWindowController: NSWindowController {
     private static let trailingMargin: CGFloat = 16  // right inset
     private static let minWindowWidth: CGFloat = 180
     private static let maxWindowWidth: CGFloat = 640
+    private static let attachedWindowLevel: NSWindow.Level = .popUpMenu
+    private static let tornOffWindowLevel: NSWindow.Level = .floating
 
     // Faint, appearance-adaptive separator line. `separatorColor` is too dark
     // on the translucent menu material; tune the alpha to taste.
@@ -162,6 +164,28 @@ class SubmenuWindowController: NSWindowController {
         visibleMenuItemsCache = nil
     }
 
+    private func detachedSubmenuIdentity(for menuItem: MenuItem) -> DetachedSubmenuIdentity {
+        DetachedSubmenuIdentity(
+            title: menuItem.title,
+            keyEquivalent: menuItem.keyEquivalent,
+            isSeparator: menuItem.isSeparator,
+            hasSubmenu: menuItem.hasSubmenu,
+            element: menuItem.element
+        )
+    }
+
+    private func pruneDetachedSubmenus() {
+        detachedSubmenus.removeAll { !$0.controller.isRestorableDetachedMenu }
+    }
+
+    private func hasRestorableDetachedSubmenu(forRow row: Int, menuItem: MenuItem) -> Bool {
+        pruneDetachedSubmenus()
+        let identity = detachedSubmenuIdentity(for: menuItem)
+        return detachedSubmenus.contains {
+            $0.sourceRow == row && $0.identity.matches(identity)
+        }
+    }
+
     private func resetInteractionStateForVisibleItemsChange() {
         closeSubmenu()
         hoveredRow = nil
@@ -169,6 +193,7 @@ class SubmenuWindowController: NSWindowController {
         childHasMouse = false
         flashState = nil
         pressedOpenSubmenuRow = nil
+        pressedDetachedSubmenuRow = nil
     }
 
     // State management for menu interactions
@@ -176,6 +201,7 @@ class SubmenuWindowController: NSWindowController {
     private var isDragging: Bool = false // True while a click-drag is in progress
     private var suppressRowTrackingUntilMouseUp = false
     private var pressedOpenSubmenuRow: Int?
+    private var pressedDetachedSubmenuRow: Int?
 
     // While an action row is flashing, this overrides hover/submenu highlight
     // for that row so the blink can't be stomped by stray hover events.
@@ -204,10 +230,35 @@ class SubmenuWindowController: NSWindowController {
     private var childHasMouse = false
 
     // Submenu windows the user has torn off; retained so they stay on screen.
-    private var detachedControllers: [SubmenuWindowController] = []
+    private struct DetachedSubmenuIdentity {
+        let title: String
+        let keyEquivalent: String?
+        let isSeparator: Bool
+        let hasSubmenu: Bool
+        let element: AXUIElement?
+
+        func matches(_ other: DetachedSubmenuIdentity) -> Bool {
+            if let element, let otherElement = other.element {
+                return CFEqual(element, otherElement)
+            }
+            return title == other.title
+                && keyEquivalent == other.keyEquivalent
+                && isSeparator == other.isSeparator
+                && hasSubmenu == other.hasSubmenu
+        }
+    }
+
+    private struct DetachedSubmenuReference {
+        let sourceRow: Int
+        let identity: DetachedSubmenuIdentity
+        let controller: SubmenuWindowController
+    }
+
+    private var detachedSubmenus: [DetachedSubmenuReference] = []
 
     // Exposed so the parent can decide whether to keep this window attached.
     var isDetached: Bool { isTornOff }
+    var isRestorableDetachedMenu: Bool { isTornOff && !userClosed }
 
     init(title: String, menuItems: [MenuItem], targetApp: NSRunningApplication?, parentMenuItem: MenuItem? = nil) {
         self.title = title
@@ -255,7 +306,7 @@ class SubmenuWindowController: NSWindowController {
         submenuWindow.standardWindowButton(.zoomButton)?.isHidden = true
 
         // Float above all application windows, like a real menu
-        submenuWindow.level = .popUpMenu
+        submenuWindow.level = Self.attachedWindowLevel
         submenuWindow.isMovableByWindowBackground = true
         submenuWindow.styleMask.insert(.fullSizeContentView)
 
@@ -354,6 +405,7 @@ class SubmenuWindowController: NSWindowController {
                 // the submenu before the child can flash/perform its action.
                 childController.handleMouseUpFromParent(at: childRow)
                 self.pressedOpenSubmenuRow = nil
+                self.pressedDetachedSubmenuRow = nil
                 self.isDragging = false
                 self.hoveredRow = nil
                 self.updateAllRowHighlights()
@@ -418,13 +470,32 @@ class SubmenuWindowController: NSWindowController {
 
     // Keep a torn-off window visible only while its target app is frontmost.
     @objc private func activeApplicationChanged(_ notification: Notification) {
+        updateTornOffVisibilityForFrontmostApplication()
+    }
+
+    private func updateTornOffVisibilityForFrontmostApplication() {
         guard isTornOff, !userClosed else { return }
         let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if frontPid == targetApp?.processIdentifier {
+            submenuWindow.level = Self.tornOffWindowLevel
             submenuWindow.orderFrontRegardless()
         } else {
+            hideTransientAttachedChildChain()
             submenuWindow.orderOut(nil)
         }
+    }
+
+    private func hideTransientAttachedChildChain() {
+        guard let child = childSubmenuController, !child.isDetached else { return }
+        child.hideWindow(animated: false)
+        childSubmenuController = nil
+        childSubmenuRow = nil
+        hoveredRow = nil
+        isDragging = false
+        pressedOpenSubmenuRow = nil
+        pressedDetachedSubmenuRow = nil
+        childHasMouse = false
+        updateAllRowHighlights()
     }
 
     // The close button was used - don't resurrect this window on app switch,
@@ -539,6 +610,7 @@ class SubmenuWindowController: NSWindowController {
                 moveDetectionTimer?.invalidate()
                 moveDetectionTimer = nil
                 isTornOff = true
+                submenuWindow.level = Self.tornOffWindowLevel
                 // Show close button for torn off windows
                 submenuWindow.standardWindowButton(.closeButton)?.isHidden = false
                 // Hover no longer selects once torn off - clear any stale
@@ -984,6 +1056,7 @@ class SubmenuWindowController: NSWindowController {
         guard !suppressRowTrackingUntilMouseUp else { return }
         guard !clearHoverForScrollCaretIfNeeded() else { return }
         pressedOpenSubmenuRow = nil
+        pressedDetachedSubmenuRow = nil
 
         // A click raises this window above its open submenu; re-assert the
         // chain on top afterwards so the submenu stays focused/visible.
@@ -994,6 +1067,9 @@ class SubmenuWindowController: NSWindowController {
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
         let menuItem = visibleMenuItems[row]
+        if menuItem.hasSubmenu, hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem) {
+            pressedDetachedSubmenuRow = row
+        }
         if menuItem.hasSubmenu, childSubmenuRow == row {
             pressedOpenSubmenuRow = row
             if isTornOff {
@@ -1108,6 +1184,7 @@ class SubmenuWindowController: NSWindowController {
 
     private func closeSubmenu() {
         pressedOpenSubmenuRow = nil
+        pressedDetachedSubmenuRow = nil
         childSubmenuController?.hideWindow(animated: false)
         childSubmenuController = nil
         childSubmenuRow = nil
@@ -1193,6 +1270,7 @@ class SubmenuWindowController: NSWindowController {
         self.hoveredRow = nil
         self.isDragging = false
         self.pressedOpenSubmenuRow = nil
+        self.pressedDetachedSubmenuRow = nil
         self.windowWidth = Self.computeContentWidth(for: menuItems)
 
         submenuWindow.title = title
@@ -1235,11 +1313,21 @@ class SubmenuWindowController: NSWindowController {
         child.onTornOff = { [weak self, weak child] in
             guard let self = self, let child = child,
                   self.childSubmenuController === child else { return }
-            self.detachedControllers.append(child)
+            if let row = self.childSubmenuRow,
+               row >= 0, row < self.visibleMenuItems.count {
+                let menuItem = self.visibleMenuItems[row]
+                self.detachedSubmenus.append(DetachedSubmenuReference(
+                    sourceRow: row,
+                    identity: self.detachedSubmenuIdentity(for: menuItem),
+                    controller: child
+                ))
+            }
+            self.pruneDetachedSubmenus()
             self.childSubmenuController = nil
             self.childSubmenuRow = nil
             self.hoveredRow = nil
             self.isDragging = false
+            self.pressedDetachedSubmenuRow = nil
             self.childHasMouse = false
             self.updateAllRowHighlights()
         }
@@ -1415,6 +1503,10 @@ class SubmenuWindowController: NSWindowController {
             self?.isProgrammaticMove = false
         }
 
+        if !isTornOff {
+            submenuWindow.level = Self.attachedWindowLevel
+        }
+
         // orderFront only (no makeKey) - matches the main menu, avoids a
         // focus-window flicker when the submenu appears.
         submenuWindow.orderFrontRegardless()
@@ -1435,6 +1527,7 @@ class SubmenuWindowController: NSWindowController {
         childSubmenuRow = nil
         hoveredRow = nil
         pressedOpenSubmenuRow = nil
+        pressedDetachedSubmenuRow = nil
 
         if animated {
             // Fade out, then order out. The strong self capture keeps the
@@ -1713,7 +1806,9 @@ extension SubmenuWindowController: NSTableViewDelegate {
     // Handle mouse up - execute leaf actions; submenus open on mouse down
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
         let pressedOpenSubmenuRow = pressedOpenSubmenuRow
+        let pressedDetachedSubmenuRow = pressedDetachedSubmenuRow
         self.pressedOpenSubmenuRow = nil
+        self.pressedDetachedSubmenuRow = nil
         if clearHoverForScrollCaretIfNeeded() { return }
         isDragging = false
         // A click can also raise this window on mouse-up; keep the chain on top
@@ -1748,6 +1843,18 @@ extension SubmenuWindowController: NSTableViewDelegate {
         let menuItem = visibleMenuItems[row]
 
         if menuItem.hasSubmenu {
+            if MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+                releasedRow: row,
+                childSubmenuRow: childSubmenuRow,
+                wasDragged: wasDragged
+            ) {
+                closeSubmenu()
+                hoveredRow = nil
+                updateAllRowHighlights()
+                return
+            }
+
             if pressedOpenSubmenuRow == row, childSubmenuRow == row {
                 if isTornOff {
                     closeSubmenu()

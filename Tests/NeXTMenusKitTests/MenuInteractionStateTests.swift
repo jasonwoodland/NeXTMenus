@@ -100,6 +100,72 @@ final class MenuInteractionStateTests: XCTestCase {
         XCTAssertEqual(submenu(hoveredRow: 3, isSeparator: true), .ignore)
     }
 
+    func testAttachedCopyMouseUpHidesOnlyWhenPressedDetachedReleasedAndChildRowsMatch() {
+        XCTAssertTrue(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: 3,
+                releasedRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: false
+            )
+        )
+    }
+
+    func testAttachedCopyMouseUpDoesNotHideForDragRelease() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: 3,
+                releasedRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: true
+            )
+        )
+    }
+
+    func testAttachedCopyMouseUpDoesNotHideForMismatchedReleaseRow() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: 3,
+                releasedRow: 4,
+                childSubmenuRow: 3,
+                wasDragged: false
+            )
+        )
+    }
+
+    func testAttachedCopyMouseUpDoesNotHideForMismatchedChildRow() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: 3,
+                releasedRow: 3,
+                childSubmenuRow: 4,
+                wasDragged: false
+            )
+        )
+    }
+
+    func testAttachedCopyMouseUpDoesNotHideWithoutTemporaryAttachedChild() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: 3,
+                releasedRow: 3,
+                childSubmenuRow: nil,
+                wasDragged: false
+            )
+        )
+    }
+
+    func testAttachedCopyMouseUpDoesNotHideWithoutPressedDetachedRow() {
+        XCTAssertFalse(
+            MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+                pressedDetachedSubmenuRow: nil,
+                releasedRow: 3,
+                childSubmenuRow: 3,
+                wasDragged: false
+            )
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,

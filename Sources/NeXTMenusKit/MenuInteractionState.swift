@@ -64,4 +64,16 @@ public enum MenuInteractionPolicy {
         guard childSubmenuRow != nil else { return .ignore }
         return .close
     }
+
+    public static func shouldHideAttachedCopyOnMouseUp(
+        pressedDetachedSubmenuRow: Int?,
+        releasedRow: Int,
+        childSubmenuRow: Int?,
+        wasDragged: Bool
+    ) -> Bool {
+        guard !wasDragged else { return false }
+        guard pressedDetachedSubmenuRow == releasedRow else { return false }
+        guard childSubmenuRow == releasedRow else { return false }
+        return true
+    }
 }

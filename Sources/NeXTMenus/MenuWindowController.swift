@@ -22,7 +22,31 @@ class MenuWindowController: NSWindowController {
     private var childSubmenuRow: Int?
 
     // Submenu windows the user has torn off; retained so they stay on screen.
-    private var detachedControllers: [SubmenuWindowController] = []
+    private struct DetachedSubmenuIdentity {
+        let title: String
+        let keyEquivalent: String?
+        let isSeparator: Bool
+        let hasSubmenu: Bool
+        let element: AXUIElement?
+
+        func matches(_ other: DetachedSubmenuIdentity) -> Bool {
+            if let element, let otherElement = other.element {
+                return CFEqual(element, otherElement)
+            }
+            return title == other.title
+                && keyEquivalent == other.keyEquivalent
+                && isSeparator == other.isSeparator
+                && hasSubmenu == other.hasSubmenu
+        }
+    }
+
+    private struct DetachedSubmenuReference {
+        let sourceRow: Int
+        let identity: DetachedSubmenuIdentity
+        let controller: SubmenuWindowController
+    }
+
+    private var detachedSubmenus: [DetachedSubmenuReference] = []
 
     // True while the pointer is in a child submenu rather than this menu.
     private var childHasMouse = false
@@ -39,6 +63,7 @@ class MenuWindowController: NSWindowController {
     // The toggle-close fires on the matching mouseup (matching the native
     // menu bar behavior - mousedown doesn't close, mouseup does).
     private var pressedRowWasOpen: Bool = false
+    private var pressedDetachedSubmenuRow: Int?
 
     // True after a click has opened a submenu and the menu is in "tracking
     // mode" - hovering siblings switches the open submenu, and hovering a
@@ -102,6 +127,28 @@ class MenuWindowController: NSWindowController {
         mainMenuRows.trailingAction(at: row)
     }
 
+    private func detachedSubmenuIdentity(for menuItem: MenuItem) -> DetachedSubmenuIdentity {
+        DetachedSubmenuIdentity(
+            title: menuItem.title,
+            keyEquivalent: menuItem.keyEquivalent,
+            isSeparator: menuItem.isSeparator,
+            hasSubmenu: menuItem.hasSubmenu,
+            element: menuItem.element
+        )
+    }
+
+    private func pruneDetachedSubmenus() {
+        detachedSubmenus.removeAll { !$0.controller.isRestorableDetachedMenu }
+    }
+
+    private func hasRestorableDetachedSubmenu(forRow row: Int, menuItem: MenuItem) -> Bool {
+        pruneDetachedSubmenus()
+        let identity = detachedSubmenuIdentity(for: menuItem)
+        return detachedSubmenus.contains {
+            $0.sourceRow == row && $0.identity.matches(identity)
+        }
+    }
+
     // Track window movement completion
     private var moveTimer: Timer?
 
@@ -155,6 +202,7 @@ class MenuWindowController: NSWindowController {
         isDragging = false
         pressedRow = nil
         pressedRowWasOpen = false
+        pressedDetachedSubmenuRow = nil
         childHasMouse = false
         isMenuActive = false
         flashState = nil
@@ -657,6 +705,7 @@ class MenuWindowController: NSWindowController {
         }
         pressedRow = row >= 0 ? row : nil
         pressedRowWasOpen = false
+        pressedDetachedSubmenuRow = nil
         guard row >= 0 else { return }
         guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
@@ -676,6 +725,9 @@ class MenuWindowController: NSWindowController {
         }
 
         guard let menuItem = mainMenuItem(at: row), !menuItem.isSeparator else { return }
+        if hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem) {
+            pressedDetachedSubmenuRow = row
+        }
         showSubmenu(for: menuItem, at: row)
     }
 
@@ -927,6 +979,7 @@ class MenuWindowController: NSWindowController {
         isDragging = false
         pressedRow = nil
         pressedRowWasOpen = false
+        pressedDetachedSubmenuRow = nil
         childHasMouse = false
         if endsTracking { isMenuActive = false }
         updateAllRowHighlights()
@@ -952,13 +1005,22 @@ class MenuWindowController: NSWindowController {
         child.onTornOff = { [weak self, weak child] in
             guard let self = self, let child = child,
                   self.childSubmenuController === child else { return }
-            self.detachedControllers.append(child)
+            if let row = self.childSubmenuRow,
+               let menuItem = self.mainMenuItem(at: row) {
+                self.detachedSubmenus.append(DetachedSubmenuReference(
+                    sourceRow: row,
+                    identity: self.detachedSubmenuIdentity(for: menuItem),
+                    controller: child
+                ))
+            }
+            self.pruneDetachedSubmenus()
             self.childSubmenuController = nil
             self.childSubmenuRow = nil
             self.hoveredRow = nil
             self.isDragging = false
             self.pressedRow = nil
             self.pressedRowWasOpen = false
+            self.pressedDetachedSubmenuRow = nil
             self.childHasMouse = false
             self.isMenuActive = false
             self.asyncSubmenuOpenGeneration += 1
@@ -1166,9 +1228,11 @@ extension MenuWindowController: NSTableViewDelegate {
     private func handleMouseUp(_ row: Int, wasDragged: Bool) {
         let wasPressedRow = pressedRow
         let wasPressedRowWasOpen = pressedRowWasOpen
+        let wasPressedDetachedSubmenuRow = pressedDetachedSubmenuRow
         isDragging = false
         pressedRow = nil
         pressedRowWasOpen = false
+        pressedDetachedSubmenuRow = nil
         // Trailing actions (Hide / Quit) fire on release, with a flash
         if let action = trailingAction(at: row) {
             performTrailingAction(action, at: row)
@@ -1191,6 +1255,16 @@ extension MenuWindowController: NSTableViewDelegate {
             collapseSubmenus()
             return
         }
+        if MenuInteractionPolicy.shouldHideAttachedCopyOnMouseUp(
+            pressedDetachedSubmenuRow: wasPressedDetachedSubmenuRow,
+            releasedRow: row,
+            childSubmenuRow: childSubmenuRow,
+            wasDragged: wasDragged
+        ) {
+            collapseSubmenus()
+            return
+        }
+
         // Toggle-close: a click (no drag) on a row that was already showing
         // its submenu at mousedown closes the chain on release - matches the
         // native menu bar behavior of mouseup, not mousedown, doing the work.
