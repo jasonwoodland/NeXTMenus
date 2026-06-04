@@ -32,7 +32,146 @@ public enum SubmenuMouseUpIntent: Equatable {
     case performLeafAction(clearHover: Bool)
 }
 
+public enum MainMouseDownAction: Equatable {
+    case none
+    case updateHighlights
+    case showSubmenu(row: Int)
+}
+
+public struct MainMouseDownDecision: Equatable {
+    public let pressedRow: Int?
+    public let pressedRowWasOpen: Bool
+    public let pressedDetachedSubmenuRow: Int?
+    public let action: MainMouseDownAction
+
+    public init(
+        pressedRow: Int?,
+        pressedRowWasOpen: Bool,
+        pressedDetachedSubmenuRow: Int?,
+        action: MainMouseDownAction
+    ) {
+        self.pressedRow = pressedRow
+        self.pressedRowWasOpen = pressedRowWasOpen
+        self.pressedDetachedSubmenuRow = pressedDetachedSubmenuRow
+        self.action = action
+    }
+}
+
+public enum SubmenuMouseDownAction: Equatable {
+    case none
+    case updateTornOffPressHighlight(row: Int)
+    case handleSubmenuPress(row: Int, updateTornOffPressHighlight: Bool)
+}
+
+public struct SubmenuMouseDownDecision: Equatable {
+    public let pressedOpenSubmenuRow: Int?
+    public let pressedDetachedSubmenuRow: Int?
+    public let action: SubmenuMouseDownAction
+
+    public init(
+        pressedOpenSubmenuRow: Int?,
+        pressedDetachedSubmenuRow: Int?,
+        action: SubmenuMouseDownAction
+    ) {
+        self.pressedOpenSubmenuRow = pressedOpenSubmenuRow
+        self.pressedDetachedSubmenuRow = pressedDetachedSubmenuRow
+        self.action = action
+    }
+}
+
 public enum MenuInteractionPolicy {
+    public static func mainMouseDownDecision(
+        row: Int,
+        isSelectable: Bool,
+        isTrailingAction: Bool,
+        childSubmenuRow: Int?,
+        hasMenuItem: Bool,
+        isSeparator: Bool,
+        hasRestorableDetachedSubmenu: Bool
+    ) -> MainMouseDownDecision {
+        let pressedRow = row >= 0 ? row : nil
+        let cleared = MainMouseDownDecision(
+            pressedRow: pressedRow,
+            pressedRowWasOpen: false,
+            pressedDetachedSubmenuRow: nil,
+            action: .none
+        )
+
+        guard row >= 0 else { return cleared }
+        guard isSelectable else { return cleared }
+
+        if isTrailingAction {
+            return MainMouseDownDecision(
+                pressedRow: pressedRow,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateHighlights
+            )
+        }
+
+        if childSubmenuRow == row {
+            return MainMouseDownDecision(
+                pressedRow: pressedRow,
+                pressedRowWasOpen: true,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateHighlights
+            )
+        }
+
+        guard hasMenuItem, !isSeparator else { return cleared }
+
+        return MainMouseDownDecision(
+            pressedRow: pressedRow,
+            pressedRowWasOpen: false,
+            pressedDetachedSubmenuRow: hasRestorableDetachedSubmenu ? row : nil,
+            action: .showSubmenu(row: row)
+        )
+    }
+
+    public static func submenuMouseDownDecision(
+        row: Int,
+        isInBounds: Bool,
+        isSelectable: Bool,
+        isTornOff: Bool,
+        childSubmenuRow: Int?,
+        hasSubmenu: Bool,
+        hasRestorableDetachedSubmenu: Bool
+    ) -> SubmenuMouseDownDecision {
+        let cleared = SubmenuMouseDownDecision(
+            pressedOpenSubmenuRow: nil,
+            pressedDetachedSubmenuRow: nil,
+            action: .none
+        )
+
+        guard row >= 0, isInBounds, isSelectable else { return cleared }
+
+        guard hasSubmenu else {
+            if isTornOff {
+                return SubmenuMouseDownDecision(
+                    pressedOpenSubmenuRow: nil,
+                    pressedDetachedSubmenuRow: nil,
+                    action: .updateTornOffPressHighlight(row: row)
+                )
+            }
+            return cleared
+        }
+
+        let pressedDetachedSubmenuRow = hasRestorableDetachedSubmenu ? row : nil
+        if childSubmenuRow == row {
+            return SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: row,
+                pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+                action: isTornOff ? .updateTornOffPressHighlight(row: row) : .none
+            )
+        }
+
+        return SubmenuMouseDownDecision(
+            pressedOpenSubmenuRow: nil,
+            pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
+            action: .handleSubmenuPress(row: row, updateTornOffPressHighlight: isTornOff)
+        )
+    }
+
     public static func mainOpenSubmenuIntent(
         hoveredRow: Int,
         childSubmenuRow: Int?,

@@ -706,29 +706,44 @@ class MenuWindowController: NSWindowController {
         pressedRow = row >= 0 ? row : nil
         pressedRowWasOpen = false
         pressedDetachedSubmenuRow = nil
-        guard row >= 0 else { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
-        // Trailing actions act on mouse-up; the press shows selection feedback
-        if trailingAction(at: row) != nil {
-            updateAllRowHighlights()
+        let isSelectable = row >= 0
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let isTrailingAction = isSelectable && trailingAction(at: row) != nil
+        let shouldInspectMenuItem = isSelectable && !isTrailingAction && childSubmenuRow != row
+        let menuItem = shouldInspectMenuItem ? mainMenuItem(at: row) : nil
+        let hasRestorableDetached: Bool
+        if let menuItem, !menuItem.isSeparator {
+            // This helper prunes stale references, so compute it only on the
+            // same branch that previously used it.
+            hasRestorableDetached = hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem)
+        } else {
+            hasRestorableDetached = false
+        }
+
+        let decision = MenuInteractionPolicy.mainMouseDownDecision(
+            row: row,
+            isSelectable: isSelectable,
+            isTrailingAction: isTrailingAction,
+            childSubmenuRow: childSubmenuRow,
+            hasMenuItem: menuItem != nil,
+            isSeparator: menuItem?.isSeparator ?? false,
+            hasRestorableDetachedSubmenu: hasRestorableDetached
+        )
+
+        pressedRow = decision.pressedRow
+        pressedRowWasOpen = decision.pressedRowWasOpen
+        pressedDetachedSubmenuRow = decision.pressedDetachedSubmenuRow
+
+        switch decision.action {
+        case .none:
             return
-        }
-
-        // If this row's submenu is already open, defer the toggle-close to
-        // mouseup (matches native menu bar - the menu doesn't close on
-        // mousedown). Mark it so the mouseup handler knows to toggle.
-        if childSubmenuRow == row {
-            pressedRowWasOpen = true
+        case .updateHighlights:
             updateAllRowHighlights()
-            return
+        case .showSubmenu(let row):
+            guard let menuItem else { return }
+            showSubmenu(for: menuItem, at: row)
         }
-
-        guard let menuItem = mainMenuItem(at: row), !menuItem.isSeparator else { return }
-        if hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem) {
-            pressedDetachedSubmenuRow = row
-        }
-        showSubmenu(for: menuItem, at: row)
     }
 
     // Handle mouse drag (button held) - open menus while dragging

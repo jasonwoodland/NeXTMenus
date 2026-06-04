@@ -346,6 +346,207 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainMouseDownOffRowClearsPressState() {
+        XCTAssertEqual(
+            mainMouseDown(row: -1),
+            MainMouseDownDecision(
+                pressedRow: nil,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+    }
+
+    func testMainMouseDownNonSelectablePreservesPressedRowOnly() {
+        XCTAssertEqual(
+            mainMouseDown(row: 3, isSelectable: false, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+    }
+
+    func testMainMouseDownTrailingActionUpdatesHighlightsOnly() {
+        XCTAssertEqual(
+            mainMouseDown(row: 7, isTrailingAction: true, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 7,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateHighlights
+            )
+        )
+    }
+
+    func testMainMouseDownAlreadyOpenMarksOpenAndIgnoresDetached() {
+        XCTAssertEqual(
+            mainMouseDown(row: 3, childSubmenuRow: 3, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: true,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateHighlights
+            )
+        )
+    }
+
+    func testMainMouseDownMissingOrSeparatorRowsDoNotShowSubmenu() {
+        XCTAssertEqual(
+            mainMouseDown(row: 3, hasMenuItem: false, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+        XCTAssertEqual(
+            mainMouseDown(row: 3, isSeparator: true, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+    }
+
+    func testMainMouseDownNormalRowsShowSubmenuAndRecordDetached() {
+        XCTAssertEqual(
+            mainMouseDown(row: 3),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: nil,
+                action: .showSubmenu(row: 3)
+            )
+        )
+        XCTAssertEqual(
+            mainMouseDown(row: 3, hasRestorableDetachedSubmenu: true),
+            MainMouseDownDecision(
+                pressedRow: 3,
+                pressedRowWasOpen: false,
+                pressedDetachedSubmenuRow: 3,
+                action: .showSubmenu(row: 3)
+            )
+        )
+    }
+
+    func testSubmenuMouseDownInvalidRowsClearPressStateOnly() {
+        XCTAssertEqual(
+            submenuMouseDown(row: -1, isInBounds: false, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+        XCTAssertEqual(
+            submenuMouseDown(row: 99, isInBounds: false, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+    }
+
+    func testSubmenuMouseDownNonSelectableOrLeafRowsIgnoreDetached() {
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isSelectable: false, hasSubmenu: true, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: false, hasSubmenu: false, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+    }
+
+    func testSubmenuMouseDownTornOffLeafUpdatesPressHighlight() {
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: true, hasSubmenu: false, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateTornOffPressHighlight(row: 3)
+            )
+        )
+    }
+
+    func testSubmenuMouseDownSubmenuRowsHandlePressAndDetachedState() {
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: false, hasSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .handleSubmenuPress(row: 3, updateTornOffPressHighlight: false)
+            )
+        )
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: true, hasSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: nil,
+                action: .handleSubmenuPress(row: 3, updateTornOffPressHighlight: true)
+            )
+        )
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, hasSubmenu: true, hasRestorableDetachedSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: nil,
+                pressedDetachedSubmenuRow: 3,
+                action: .handleSubmenuPress(row: 3, updateTornOffPressHighlight: false)
+            )
+        )
+    }
+
+    func testSubmenuMouseDownAlreadyOpenRowsPreserveAttachedAndTornOffDifferences() {
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: false, childSubmenuRow: 3, hasSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: 3,
+                pressedDetachedSubmenuRow: nil,
+                action: .none
+            )
+        )
+        XCTAssertEqual(
+            submenuMouseDown(row: 3, isTornOff: true, childSubmenuRow: 3, hasSubmenu: true),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: 3,
+                pressedDetachedSubmenuRow: nil,
+                action: .updateTornOffPressHighlight(row: 3)
+            )
+        )
+    }
+
+    func testSubmenuMouseDownDetachedAlreadyOpenRecordsBothStates() {
+        XCTAssertEqual(
+            submenuMouseDown(
+                row: 3,
+                childSubmenuRow: 3,
+                hasSubmenu: true,
+                hasRestorableDetachedSubmenu: true
+            ),
+            SubmenuMouseDownDecision(
+                pressedOpenSubmenuRow: 3,
+                pressedDetachedSubmenuRow: 3,
+                action: .none
+            )
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,
@@ -433,6 +634,46 @@ final class MenuInteractionStateTests: XCTestCase {
             isSelectable: isSelectable,
             hasSubmenu: hasSubmenu,
             hasElement: hasElement
+        )
+    }
+
+    private func mainMouseDown(
+        row: Int,
+        isSelectable: Bool = true,
+        isTrailingAction: Bool = false,
+        childSubmenuRow: Int? = nil,
+        hasMenuItem: Bool = true,
+        isSeparator: Bool = false,
+        hasRestorableDetachedSubmenu: Bool = false
+    ) -> MainMouseDownDecision {
+        MenuInteractionPolicy.mainMouseDownDecision(
+            row: row,
+            isSelectable: isSelectable,
+            isTrailingAction: isTrailingAction,
+            childSubmenuRow: childSubmenuRow,
+            hasMenuItem: hasMenuItem,
+            isSeparator: isSeparator,
+            hasRestorableDetachedSubmenu: hasRestorableDetachedSubmenu
+        )
+    }
+
+    private func submenuMouseDown(
+        row: Int,
+        isInBounds: Bool = true,
+        isSelectable: Bool = true,
+        isTornOff: Bool = false,
+        childSubmenuRow: Int? = nil,
+        hasSubmenu: Bool = false,
+        hasRestorableDetachedSubmenu: Bool = false
+    ) -> SubmenuMouseDownDecision {
+        MenuInteractionPolicy.submenuMouseDownDecision(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            isTornOff: isTornOff,
+            childSubmenuRow: childSubmenuRow,
+            hasSubmenu: hasSubmenu,
+            hasRestorableDetachedSubmenu: hasRestorableDetachedSubmenu
         )
     }
 }

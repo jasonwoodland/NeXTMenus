@@ -1075,31 +1075,46 @@ class SubmenuWindowController: NSWindowController {
         defer {
             DispatchQueue.main.async { [weak self] in self?.raiseSubmenuChain() }
         }
-        guard row >= 0 && row < visibleMenuItems.count else { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
 
-        let menuItem = visibleMenuItems[row]
-        if menuItem.hasSubmenu, hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem) {
-            pressedDetachedSubmenuRow = row
+        let isInBounds = row >= 0 && row < visibleMenuItems.count
+        let isSelectable = isInBounds
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isSelectable ? visibleMenuItems[row] : nil
+        let hasRestorableDetached: Bool
+        if let menuItem, menuItem.hasSubmenu {
+            // This helper prunes stale references, so compute it only for the
+            // selectable submenu-capable branch that previously used it.
+            hasRestorableDetached = hasRestorableDetachedSubmenu(forRow: row, menuItem: menuItem)
+        } else {
+            hasRestorableDetached = false
         }
-        if menuItem.hasSubmenu, childSubmenuRow == row {
-            pressedOpenSubmenuRow = row
-            if isTornOff {
+
+        let decision = MenuInteractionPolicy.submenuMouseDownDecision(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            isTornOff: isTornOff,
+            childSubmenuRow: childSubmenuRow,
+            hasSubmenu: menuItem?.hasSubmenu ?? false,
+            hasRestorableDetachedSubmenu: hasRestorableDetached
+        )
+
+        pressedOpenSubmenuRow = decision.pressedOpenSubmenuRow
+        pressedDetachedSubmenuRow = decision.pressedDetachedSubmenuRow
+
+        switch decision.action {
+        case .none:
+            return
+        case .updateTornOffPressHighlight(let row):
+            hoveredRow = row
+            isDragging = true
+            updateAllRowHighlights()
+        case .handleSubmenuPress(let row, let updateTornOffPressHighlight):
+            if updateTornOffPressHighlight {
                 hoveredRow = row
                 isDragging = true
                 updateAllRowHighlights()
             }
-            return
-        }
-
-        if isTornOff {
-            hoveredRow = row
-            isDragging = true
-            updateAllRowHighlights()
-        }
-
-        // Open the submenu on press; leaf items act on mouse up
-        if menuItem.hasSubmenu {
             handleMouseClickedRow(row)
         }
     }
