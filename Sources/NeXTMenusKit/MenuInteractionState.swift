@@ -79,7 +79,196 @@ public struct SubmenuMouseDownDecision: Equatable {
     }
 }
 
+public enum MainInteractionResetReason: Equatable {
+    case collapse(endsTracking: Bool)
+    case visibleItemsChanged
+    case childTornOff
+}
+
+public struct MainInteractionResetPlan: Equatable {
+    public let clearChildSubmenu: Bool
+    public let clearHoveredRow: Bool
+    public let clearDragging: Bool
+    public let clearPressedRow: Bool
+    public let clearPressedRowWasOpen: Bool
+    public let clearPressedDetachedSubmenuRow: Bool
+    public let clearChildHasMouse: Bool
+    public let deactivateMenu: Bool
+    public let clearFlash: Bool
+    public let invalidateAsyncSubmenuOpen: Bool
+
+    public init(
+        clearChildSubmenu: Bool,
+        clearHoveredRow: Bool,
+        clearDragging: Bool,
+        clearPressedRow: Bool,
+        clearPressedRowWasOpen: Bool,
+        clearPressedDetachedSubmenuRow: Bool,
+        clearChildHasMouse: Bool,
+        deactivateMenu: Bool,
+        clearFlash: Bool,
+        invalidateAsyncSubmenuOpen: Bool
+    ) {
+        self.clearChildSubmenu = clearChildSubmenu
+        self.clearHoveredRow = clearHoveredRow
+        self.clearDragging = clearDragging
+        self.clearPressedRow = clearPressedRow
+        self.clearPressedRowWasOpen = clearPressedRowWasOpen
+        self.clearPressedDetachedSubmenuRow = clearPressedDetachedSubmenuRow
+        self.clearChildHasMouse = clearChildHasMouse
+        self.deactivateMenu = deactivateMenu
+        self.clearFlash = clearFlash
+        self.invalidateAsyncSubmenuOpen = invalidateAsyncSubmenuOpen
+    }
+}
+
+public enum SubmenuInteractionResetReason: Equatable {
+    case closeChild
+    case visibleItemsChanged
+    case hideTransientAttachedChild
+    case windowWillClose
+    case childTornOff
+    case hideWindow
+}
+
+public struct SubmenuInteractionResetPlan: Equatable {
+    public let clearChildSubmenu: Bool
+    public let clearHoveredRow: Bool
+    public let clearDragging: Bool
+    public let clearPressedOpenSubmenuRow: Bool
+    public let clearPressedDetachedSubmenuRow: Bool
+    public let clearChildHasMouse: Bool
+    public let clearFlash: Bool
+
+    public init(
+        clearChildSubmenu: Bool,
+        clearHoveredRow: Bool,
+        clearDragging: Bool,
+        clearPressedOpenSubmenuRow: Bool,
+        clearPressedDetachedSubmenuRow: Bool,
+        clearChildHasMouse: Bool,
+        clearFlash: Bool
+    ) {
+        self.clearChildSubmenu = clearChildSubmenu
+        self.clearHoveredRow = clearHoveredRow
+        self.clearDragging = clearDragging
+        self.clearPressedOpenSubmenuRow = clearPressedOpenSubmenuRow
+        self.clearPressedDetachedSubmenuRow = clearPressedDetachedSubmenuRow
+        self.clearChildHasMouse = clearChildHasMouse
+        self.clearFlash = clearFlash
+    }
+}
+
 public enum MenuInteractionPolicy {
+    public static func mainResetPlan(for reason: MainInteractionResetReason) -> MainInteractionResetPlan {
+        switch reason {
+        case .collapse(let endsTracking):
+            return MainInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: endsTracking,
+                clearFlash: false,
+                invalidateAsyncSubmenuOpen: true
+            )
+        case .visibleItemsChanged:
+            return MainInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: true,
+                clearFlash: true,
+                invalidateAsyncSubmenuOpen: true
+            )
+        case .childTornOff:
+            return MainInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: true,
+                clearFlash: false,
+                invalidateAsyncSubmenuOpen: true
+            )
+        }
+    }
+
+    public static func submenuResetPlan(for reason: SubmenuInteractionResetReason) -> SubmenuInteractionResetPlan {
+        switch reason {
+        case .closeChild:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: false,
+                clearDragging: false,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: false,
+                clearFlash: false
+            )
+        case .visibleItemsChanged:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: true
+            )
+        case .hideTransientAttachedChild:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: false
+            )
+        case .windowWillClose:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: false,
+                clearDragging: false,
+                clearPressedOpenSubmenuRow: false,
+                clearPressedDetachedSubmenuRow: false,
+                clearChildHasMouse: false,
+                clearFlash: false
+            )
+        case .childTornOff:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: false,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: false
+            )
+        case .hideWindow:
+            return SubmenuInteractionResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: false,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: false,
+                clearFlash: false
+            )
+        }
+    }
+
     public static func mainMouseDownDecision(
         row: Int,
         isSelectable: Bool,

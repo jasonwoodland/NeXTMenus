@@ -547,6 +547,160 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainResetPlanForCollapseEndingTrackingClearsWithoutFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: true)),
+            mainResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: true,
+                clearFlash: false,
+                invalidateAsyncSubmenuOpen: true
+            )
+        )
+    }
+
+    func testMainResetPlanForCollapsePreservingTrackingKeepsMenuActive() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: false)),
+            mainResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: false,
+                clearFlash: false,
+                invalidateAsyncSubmenuOpen: true
+            )
+        )
+    }
+
+    func testMainResetPlanForVisibleItemsChangedClearsFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.mainResetPlan(for: .visibleItemsChanged),
+            mainResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: true,
+                clearFlash: true,
+                invalidateAsyncSubmenuOpen: true
+            )
+        )
+    }
+
+    func testMainResetPlanForChildTornOffKeepsFlashAsymmetry() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.mainResetPlan(for: .childTornOff),
+            mainResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedRow: true,
+                clearPressedRowWasOpen: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                deactivateMenu: true,
+                clearFlash: false,
+                invalidateAsyncSubmenuOpen: true
+            )
+        )
+    }
+
+    func testSubmenuResetPlanForCloseChildClearsOnlyChildAndPressState() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .closeChild),
+            submenuResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: false,
+                clearDragging: false,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: false,
+                clearFlash: false
+            )
+        )
+    }
+
+    func testSubmenuResetPlanForVisibleItemsChangedClearsFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .visibleItemsChanged),
+            submenuResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: true
+            )
+        )
+    }
+
+    func testSubmenuResetPlanForHideTransientAttachedChildKeepsFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .hideTransientAttachedChild),
+            submenuResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: false
+            )
+        )
+    }
+
+    func testSubmenuResetPlanForWindowWillCloseClearsOnlyChild() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .windowWillClose),
+            submenuResetPlan(clearChildSubmenu: true)
+        )
+    }
+
+    func testSubmenuResetPlanForChildTornOffPreservesPressedOpenAndFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .childTornOff),
+            submenuResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: true,
+                clearPressedOpenSubmenuRow: false,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: true,
+                clearFlash: false
+            )
+        )
+    }
+
+    func testSubmenuResetPlanForHideWindowPreservesDragChildMouseAndFlash() {
+        XCTAssertEqual(
+            MenuInteractionPolicy.submenuResetPlan(for: .hideWindow),
+            submenuResetPlan(
+                clearChildSubmenu: true,
+                clearHoveredRow: true,
+                clearDragging: false,
+                clearPressedOpenSubmenuRow: true,
+                clearPressedDetachedSubmenuRow: true,
+                clearChildHasMouse: false,
+                clearFlash: false
+            )
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,
@@ -674,6 +828,52 @@ final class MenuInteractionStateTests: XCTestCase {
             childSubmenuRow: childSubmenuRow,
             hasSubmenu: hasSubmenu,
             hasRestorableDetachedSubmenu: hasRestorableDetachedSubmenu
+        )
+    }
+
+    private func mainResetPlan(
+        clearChildSubmenu: Bool = false,
+        clearHoveredRow: Bool = false,
+        clearDragging: Bool = false,
+        clearPressedRow: Bool = false,
+        clearPressedRowWasOpen: Bool = false,
+        clearPressedDetachedSubmenuRow: Bool = false,
+        clearChildHasMouse: Bool = false,
+        deactivateMenu: Bool = false,
+        clearFlash: Bool = false,
+        invalidateAsyncSubmenuOpen: Bool = false
+    ) -> MainInteractionResetPlan {
+        MainInteractionResetPlan(
+            clearChildSubmenu: clearChildSubmenu,
+            clearHoveredRow: clearHoveredRow,
+            clearDragging: clearDragging,
+            clearPressedRow: clearPressedRow,
+            clearPressedRowWasOpen: clearPressedRowWasOpen,
+            clearPressedDetachedSubmenuRow: clearPressedDetachedSubmenuRow,
+            clearChildHasMouse: clearChildHasMouse,
+            deactivateMenu: deactivateMenu,
+            clearFlash: clearFlash,
+            invalidateAsyncSubmenuOpen: invalidateAsyncSubmenuOpen
+        )
+    }
+
+    private func submenuResetPlan(
+        clearChildSubmenu: Bool = false,
+        clearHoveredRow: Bool = false,
+        clearDragging: Bool = false,
+        clearPressedOpenSubmenuRow: Bool = false,
+        clearPressedDetachedSubmenuRow: Bool = false,
+        clearChildHasMouse: Bool = false,
+        clearFlash: Bool = false
+    ) -> SubmenuInteractionResetPlan {
+        SubmenuInteractionResetPlan(
+            clearChildSubmenu: clearChildSubmenu,
+            clearHoveredRow: clearHoveredRow,
+            clearDragging: clearDragging,
+            clearPressedOpenSubmenuRow: clearPressedOpenSubmenuRow,
+            clearPressedDetachedSubmenuRow: clearPressedDetachedSubmenuRow,
+            clearChildHasMouse: clearChildHasMouse,
+            clearFlash: clearFlash
         )
     }
 }

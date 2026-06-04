@@ -187,14 +187,31 @@ class SubmenuWindowController: NSWindowController {
         }
     }
 
+    private func applyInteractionResetPlan(
+        _ plan: SubmenuInteractionResetPlan,
+        clearChildSubmenuReferences: Bool = true
+    ) {
+        if plan.clearChildSubmenu, clearChildSubmenuReferences {
+            childSubmenuController = nil
+            childSubmenuRow = nil
+        }
+        if plan.clearHoveredRow { hoveredRow = nil }
+        if plan.clearDragging { isDragging = false }
+        if plan.clearPressedOpenSubmenuRow { pressedOpenSubmenuRow = nil }
+        if plan.clearPressedDetachedSubmenuRow { pressedDetachedSubmenuRow = nil }
+        if plan.clearChildHasMouse { childHasMouse = false }
+        if plan.clearFlash { flashState = nil }
+    }
+
     private func resetInteractionStateForVisibleItemsChange() {
         closeSubmenu()
-        hoveredRow = nil
-        isDragging = false
-        childHasMouse = false
-        flashState = nil
-        pressedOpenSubmenuRow = nil
-        pressedDetachedSubmenuRow = nil
+        let resetPlan = MenuInteractionPolicy.submenuResetPlan(for: .visibleItemsChanged)
+        if resetPlan.clearHoveredRow { hoveredRow = nil }
+        if resetPlan.clearDragging { isDragging = false }
+        if resetPlan.clearChildHasMouse { childHasMouse = false }
+        if resetPlan.clearFlash { flashState = nil }
+        if resetPlan.clearPressedOpenSubmenuRow { pressedOpenSubmenuRow = nil }
+        if resetPlan.clearPressedDetachedSubmenuRow { pressedDetachedSubmenuRow = nil }
     }
 
     // State management for menu interactions
@@ -499,13 +516,7 @@ class SubmenuWindowController: NSWindowController {
     private func hideTransientAttachedChildChain() {
         guard let child = childSubmenuController, !child.isDetached else { return }
         child.hideWindow(animated: false)
-        childSubmenuController = nil
-        childSubmenuRow = nil
-        hoveredRow = nil
-        isDragging = false
-        pressedOpenSubmenuRow = nil
-        pressedDetachedSubmenuRow = nil
-        childHasMouse = false
+        applyInteractionResetPlan(MenuInteractionPolicy.submenuResetPlan(for: .hideTransientAttachedChild))
         updateAllRowHighlights()
     }
 
@@ -514,8 +525,7 @@ class SubmenuWindowController: NSWindowController {
     @objc private func windowWillClose(_ notification: Notification) {
         userClosed = true
         childSubmenuController?.submenuWindow.close()
-        childSubmenuController = nil
-        childSubmenuRow = nil
+        applyInteractionResetPlan(MenuInteractionPolicy.submenuResetPlan(for: .windowWillClose))
     }
 
     private func setupModifierMonitor() {
@@ -1210,11 +1220,13 @@ class SubmenuWindowController: NSWindowController {
     }
 
     private func closeSubmenu() {
-        pressedOpenSubmenuRow = nil
-        pressedDetachedSubmenuRow = nil
+        let resetPlan = MenuInteractionPolicy.submenuResetPlan(for: .closeChild)
+        applyInteractionResetPlan(resetPlan, clearChildSubmenuReferences: false)
         childSubmenuController?.hideWindow(animated: false)
-        childSubmenuController = nil
-        childSubmenuRow = nil
+        if resetPlan.clearChildSubmenu {
+            childSubmenuController = nil
+            childSubmenuRow = nil
+        }
     }
 
     // Maps a filled mark character (as macOS reports it) to an outline glyph.
@@ -1350,12 +1362,7 @@ class SubmenuWindowController: NSWindowController {
                 ))
             }
             self.pruneDetachedSubmenus()
-            self.childSubmenuController = nil
-            self.childSubmenuRow = nil
-            self.hoveredRow = nil
-            self.isDragging = false
-            self.pressedDetachedSubmenuRow = nil
-            self.childHasMouse = false
+            self.applyInteractionResetPlan(MenuInteractionPolicy.submenuResetPlan(for: .childTornOff))
             self.updateAllRowHighlights()
         }
         child.dismissChain = { [weak self] in
@@ -1550,11 +1557,7 @@ class SubmenuWindowController: NSWindowController {
 
         // Hide child submenu first (unless they're torn off)
         childSubmenuController?.hideWindow(animated: animated)
-        childSubmenuController = nil
-        childSubmenuRow = nil
-        hoveredRow = nil
-        pressedOpenSubmenuRow = nil
-        pressedDetachedSubmenuRow = nil
+        applyInteractionResetPlan(MenuInteractionPolicy.submenuResetPlan(for: .hideWindow))
 
         if animated {
             // Fade out, then order out. The strong self capture keeps the

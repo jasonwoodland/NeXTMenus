@@ -193,19 +193,26 @@ class MenuWindowController: NSWindowController {
         promotedAppMenuItemsCache = nil
     }
 
+    private func applyInteractionResetPlan(_ plan: MainInteractionResetPlan) {
+        if plan.clearChildSubmenu {
+            childSubmenuController = nil
+            childSubmenuRow = nil
+        }
+        if plan.clearHoveredRow { hoveredRow = nil }
+        if plan.clearDragging { isDragging = false }
+        if plan.clearPressedRow { pressedRow = nil }
+        if plan.clearPressedRowWasOpen { pressedRowWasOpen = false }
+        if plan.clearPressedDetachedSubmenuRow { pressedDetachedSubmenuRow = nil }
+        if plan.clearChildHasMouse { childHasMouse = false }
+        if plan.deactivateMenu { isMenuActive = false }
+        if plan.clearFlash { flashState = nil }
+    }
+
     private func resetInteractionStateForVisibleItemsChange() {
-        asyncSubmenuOpenGeneration += 1
+        let resetPlan = MenuInteractionPolicy.mainResetPlan(for: .visibleItemsChanged)
+        if resetPlan.invalidateAsyncSubmenuOpen { asyncSubmenuOpenGeneration += 1 }
         childSubmenuController?.hideWindow(animated: false)
-        childSubmenuController = nil
-        childSubmenuRow = nil
-        hoveredRow = nil
-        isDragging = false
-        pressedRow = nil
-        pressedRowWasOpen = false
-        pressedDetachedSubmenuRow = nil
-        childHasMouse = false
-        isMenuActive = false
-        flashState = nil
+        applyInteractionResetPlan(resetPlan)
     }
 
     init(appName: String, appMenuItem: MenuItem?, menuItems: [MenuItem], targetApp: NSRunningApplication) {
@@ -986,17 +993,10 @@ class MenuWindowController: NSWindowController {
     // closing as a hover side-effect (e.g. hovering a trailing action while
     // a submenu is open) so subsequent hovers can still open submenus.
     func collapseSubmenus(endsTracking: Bool = true) {
-        asyncSubmenuOpenGeneration += 1
+        let resetPlan = MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: endsTracking))
+        if resetPlan.invalidateAsyncSubmenuOpen { asyncSubmenuOpenGeneration += 1 }
         childSubmenuController?.hideWindow()
-        childSubmenuController = nil
-        childSubmenuRow = nil
-        hoveredRow = nil
-        isDragging = false
-        pressedRow = nil
-        pressedRowWasOpen = false
-        pressedDetachedSubmenuRow = nil
-        childHasMouse = false
-        if endsTracking { isMenuActive = false }
+        applyInteractionResetPlan(resetPlan)
         updateAllRowHighlights()
     }
 
@@ -1029,16 +1029,9 @@ class MenuWindowController: NSWindowController {
                 ))
             }
             self.pruneDetachedSubmenus()
-            self.childSubmenuController = nil
-            self.childSubmenuRow = nil
-            self.hoveredRow = nil
-            self.isDragging = false
-            self.pressedRow = nil
-            self.pressedRowWasOpen = false
-            self.pressedDetachedSubmenuRow = nil
-            self.childHasMouse = false
-            self.isMenuActive = false
-            self.asyncSubmenuOpenGeneration += 1
+            let resetPlan = MenuInteractionPolicy.mainResetPlan(for: .childTornOff)
+            self.applyInteractionResetPlan(resetPlan)
+            if resetPlan.invalidateAsyncSubmenuOpen { self.asyncSubmenuOpenGeneration += 1 }
             self.updateAllRowHighlights()
         }
         // An action performed deep in the attached chain dismisses/hides the main menu.
