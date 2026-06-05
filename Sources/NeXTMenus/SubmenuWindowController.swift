@@ -1031,18 +1031,21 @@ class SubmenuWindowController: NSWindowController {
             hoveredRow = row
             updateAllRowHighlights()
         }
-        if rowChanged {
-            if isTornOff {
-                // Torn-off: once a submenu is open, hovering another submenu
-                // item switches to it. Hovering a non-submenu item does
-                // nothing - the open submenu stays and leaf rows don't react.
-                if childSubmenuRow != nil, isSubmenuRow(row) {
-                    updateOpenSubmenu(forHoveredRow: row)
-                }
-            } else {
-                // Attached to the chain: plain hover opens/switches freely.
-                updateOpenSubmenu(forHoveredRow: row)
-            }
+        let hoveredRowIsSubmenuRow = rowChanged && isTornOff && childSubmenuRow != nil
+            ? isSubmenuRow(row)
+            : false
+        let intent = MenuInteractionPolicy.submenuMouseMoveHoverOpenIntent(
+            row: row,
+            rowChanged: rowChanged,
+            isTornOff: isTornOff,
+            childSubmenuRow: childSubmenuRow,
+            hoveredRowIsSubmenuRow: hoveredRowIsSubmenuRow
+        )
+        switch intent {
+        case .ignore:
+            break
+        case .updateOpenSubmenu(let row):
+            updateOpenSubmenu(forHoveredRow: row)
         }
     }
 

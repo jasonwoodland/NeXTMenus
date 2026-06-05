@@ -12,6 +12,11 @@ public enum SubmenuOpenSubmenuIntent: Equatable {
     case present(row: Int)
 }
 
+public enum MouseMoveHoverOpenIntent: Equatable {
+    case ignore
+    case updateOpenSubmenu(row: Int)
+}
+
 public enum MainAsyncDragSubmenuIntent: Equatable {
     case ignore
     case startAsyncOpen(row: Int)
@@ -273,6 +278,30 @@ public enum MenuInteractionPolicy {
                 clearFlash: false
             )
         }
+    }
+
+    public static func mainMouseMoveHoverOpenIntent(
+        row: Int,
+        rowChanged: Bool,
+        childSubmenuRow: Int?,
+        isMenuActive: Bool
+    ) -> MouseMoveHoverOpenIntent {
+        guard rowChanged else { return .ignore }
+        guard childSubmenuRow != nil || isMenuActive else { return .ignore }
+        return .updateOpenSubmenu(row: row)
+    }
+
+    public static func submenuMouseMoveHoverOpenIntent(
+        row: Int,
+        rowChanged: Bool,
+        isTornOff: Bool,
+        childSubmenuRow: Int?,
+        hoveredRowIsSubmenuRow: Bool
+    ) -> MouseMoveHoverOpenIntent {
+        guard rowChanged else { return .ignore }
+        guard isTornOff else { return .updateOpenSubmenu(row: row) }
+        guard childSubmenuRow != nil, hoveredRowIsSubmenuRow else { return .ignore }
+        return .updateOpenSubmenu(row: row)
     }
 
     public static func mainAsyncDragSubmenuIntent(

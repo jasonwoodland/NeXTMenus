@@ -682,7 +682,16 @@ class MenuWindowController: NSWindowController {
         // hovering a sibling switches the open submenu. Tracking mode persists
         // through trailing-action hovers that close the current submenu, so
         // hovering a submenu item afterwards still opens it.
-        if rowChanged, childSubmenuRow != nil || isMenuActive {
+        let intent = MenuInteractionPolicy.mainMouseMoveHoverOpenIntent(
+            row: row,
+            rowChanged: rowChanged,
+            childSubmenuRow: childSubmenuRow,
+            isMenuActive: isMenuActive
+        )
+        switch intent {
+        case .ignore:
+            break
+        case .updateOpenSubmenu(let row):
             updateOpenSubmenu(forHoveredRow: row)
         }
     }

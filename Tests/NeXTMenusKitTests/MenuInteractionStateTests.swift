@@ -816,6 +816,109 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainMouseMoveHoverOpenGateSameRowIgnoresEvenWhenActiveOrChildOpen() {
+        XCTAssertEqual(
+            mainMouseMove(row: 3, rowChanged: false, childSubmenuRow: 2, isMenuActive: true),
+            .ignore
+        )
+    }
+
+    func testMainMouseMoveHoverOpenGateInactiveWithoutChildIgnores() {
+        XCTAssertEqual(mainMouseMove(row: 3, rowChanged: true), .ignore)
+    }
+
+    func testMainMouseMoveHoverOpenGateOpenChildUpdatesIncludingOffRow() {
+        XCTAssertEqual(
+            mainMouseMove(row: 3, rowChanged: true, childSubmenuRow: 2),
+            .updateOpenSubmenu(row: 3)
+        )
+        XCTAssertEqual(
+            mainMouseMove(row: -1, rowChanged: true, childSubmenuRow: 2),
+            .updateOpenSubmenu(row: -1)
+        )
+    }
+
+    func testMainMouseMoveHoverOpenGateActiveWithoutChildUpdates() {
+        XCTAssertEqual(
+            mainMouseMove(row: 4, rowChanged: true, isMenuActive: true),
+            .updateOpenSubmenu(row: 4)
+        )
+    }
+
+    func testSubmenuMouseMoveHoverOpenGateSameRowIgnoresForAttachedAndTornOff() {
+        XCTAssertEqual(
+            submenuMouseMove(row: 3, rowChanged: false, isTornOff: false),
+            .ignore
+        )
+        XCTAssertEqual(
+            submenuMouseMove(
+                row: 3,
+                rowChanged: false,
+                isTornOff: true,
+                childSubmenuRow: 2,
+                hoveredRowIsSubmenuRow: true
+            ),
+            .ignore
+        )
+    }
+
+    func testSubmenuMouseMoveHoverOpenGateAttachedUpdatesForLeafAndOffRow() {
+        XCTAssertEqual(
+            submenuMouseMove(row: 3, rowChanged: true, isTornOff: false, hoveredRowIsSubmenuRow: false),
+            .updateOpenSubmenu(row: 3)
+        )
+        XCTAssertEqual(
+            submenuMouseMove(row: -1, rowChanged: true, isTornOff: false, hoveredRowIsSubmenuRow: false),
+            .updateOpenSubmenu(row: -1)
+        )
+    }
+
+    func testSubmenuMouseMoveHoverOpenGateTornOffRequiresChildAndSubmenuRow() {
+        XCTAssertEqual(
+            submenuMouseMove(
+                row: 3,
+                rowChanged: true,
+                isTornOff: true,
+                childSubmenuRow: 2,
+                hoveredRowIsSubmenuRow: true
+            ),
+            .updateOpenSubmenu(row: 3)
+        )
+        XCTAssertEqual(
+            submenuMouseMove(
+                row: 3,
+                rowChanged: true,
+                isTornOff: true,
+                childSubmenuRow: nil,
+                hoveredRowIsSubmenuRow: true
+            ),
+            .ignore
+        )
+        XCTAssertEqual(
+            submenuMouseMove(
+                row: -1,
+                rowChanged: true,
+                isTornOff: true,
+                childSubmenuRow: 2,
+                hoveredRowIsSubmenuRow: false
+            ),
+            .ignore
+        )
+    }
+
+    func testSubmenuMouseMoveHoverOpenGateTornOffDisabledSubmenuCapableRowIgnores() {
+        XCTAssertEqual(
+            submenuMouseMove(
+                row: 3,
+                rowChanged: true,
+                isTornOff: true,
+                childSubmenuRow: 2,
+                hoveredRowIsSubmenuRow: false
+            ),
+            .ignore
+        )
+    }
+
     private func main(
         hoveredRow: Int,
         childSubmenuRow: Int? = nil,
@@ -855,6 +958,36 @@ final class MenuInteractionStateTests: XCTestCase {
             isSelectable: isSelectable,
             isSeparator: isSeparator,
             hasSubmenu: hasSubmenu
+        )
+    }
+
+    private func mainMouseMove(
+        row: Int,
+        rowChanged: Bool = true,
+        childSubmenuRow: Int? = nil,
+        isMenuActive: Bool = false
+    ) -> MouseMoveHoverOpenIntent {
+        MenuInteractionPolicy.mainMouseMoveHoverOpenIntent(
+            row: row,
+            rowChanged: rowChanged,
+            childSubmenuRow: childSubmenuRow,
+            isMenuActive: isMenuActive
+        )
+    }
+
+    private func submenuMouseMove(
+        row: Int,
+        rowChanged: Bool = true,
+        isTornOff: Bool = false,
+        childSubmenuRow: Int? = nil,
+        hoveredRowIsSubmenuRow: Bool = false
+    ) -> MouseMoveHoverOpenIntent {
+        MenuInteractionPolicy.submenuMouseMoveHoverOpenIntent(
+            row: row,
+            rowChanged: rowChanged,
+            isTornOff: isTornOff,
+            childSubmenuRow: childSubmenuRow,
+            hoveredRowIsSubmenuRow: hoveredRowIsSubmenuRow
         )
     }
 
