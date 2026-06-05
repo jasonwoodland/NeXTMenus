@@ -1935,16 +1935,28 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
     // Execute action at row (called from parent window)
     func executeActionAtRow(_ row: Int) {
-        guard row >= 0 && row < visibleMenuItems.count else { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+        let isInBounds = row >= 0 && row < visibleMenuItems.count
+        let isSelectable = isInBounds
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isInBounds ? visibleMenuItems[row] : nil
+        let element = menuItem?.element
+        let intent = MenuInteractionPolicy.submenuRowActionExecutionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            hasElement: element != nil
+        )
 
-        let menuItem = visibleMenuItems[row]
-        guard let element = menuItem.element else { return }
-
-        // Execute action
-        targetApp?.activate(options: [])
-        usleep(50000)
-        AXUIElementPerformAction(element, kAXPressAction as CFString)
+        switch intent {
+        case .ignore:
+            return
+        case .perform:
+            guard let element else { return }
+            // Execute action
+            targetApp?.activate(options: [])
+            usleep(50000)
+            AXUIElementPerformAction(element, kAXPressAction as CFString)
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

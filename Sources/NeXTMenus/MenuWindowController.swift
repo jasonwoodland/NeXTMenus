@@ -1354,16 +1354,32 @@ extension MenuWindowController: NSTableViewDelegate {
 
     // Execute action at row (called from child window)
     func executeActionAtRow(_ row: Int) {
-        guard row >= 0 else { return }
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else { return }
+        let isInBounds = row >= 0 && row < mainMenuRows.count
+        let isSelectable = row >= 0
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isInBounds ? mainMenuItem(at: row) : nil
+        let element = menuItem?.element
+        let intent = MenuInteractionPolicy.mainRowActionExecutionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            hasMenuItem: menuItem != nil,
+            hasElement: element != nil
+        )
 
-        guard let menuItem = mainMenuItem(at: row), let element = menuItem.element else { return }
-
-        // Execute action
-        targetApp?.activate(options: [])
-        usleep(50000)
-        AXUIElementPerformAction(element, kAXPressAction as CFString)
-        dismissAfterAction()
+        switch intent {
+        case .ignore:
+            return
+        case .perform(_, let shouldDismissAfterAction):
+            guard let element else { return }
+            // Execute action
+            targetApp?.activate(options: [])
+            usleep(50000)
+            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            if shouldDismissAfterAction {
+                dismissAfterAction()
+            }
+        }
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

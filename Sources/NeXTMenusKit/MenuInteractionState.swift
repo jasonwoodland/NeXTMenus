@@ -54,6 +54,11 @@ public enum SubmenuClickedRowActionIntent: Equatable {
     case performLeafAction(row: Int)
 }
 
+public enum RowActionExecutionIntent: Equatable {
+    case ignore
+    case perform(row: Int, dismissAfterAction: Bool)
+}
+
 public enum MainMouseDownAction: Equatable {
     case none
     case updateHighlights
@@ -468,6 +473,31 @@ public enum MenuInteractionPolicy {
         }
 
         return .ignore
+    }
+
+    public static func mainRowActionExecutionIntent(
+        row: Int,
+        isInBounds: Bool,
+        isSelectable: Bool,
+        hasMenuItem: Bool,
+        hasElement: Bool
+    ) -> RowActionExecutionIntent {
+        guard row >= 0, isInBounds, isSelectable, hasMenuItem, hasElement else {
+            return .ignore
+        }
+        return .perform(row: row, dismissAfterAction: true)
+    }
+
+    public static func submenuRowActionExecutionIntent(
+        row: Int,
+        isInBounds: Bool,
+        isSelectable: Bool,
+        hasElement: Bool
+    ) -> RowActionExecutionIntent {
+        guard row >= 0, isInBounds, isSelectable, hasElement else {
+            return .ignore
+        }
+        return .perform(row: row, dismissAfterAction: false)
     }
 
     public static func mainOpenSubmenuIntent(

@@ -627,6 +627,67 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testMainRowActionExecutionInvalidRowsIgnore() {
+        XCTAssertEqual(mainRowAction(row: -1, isInBounds: false), .ignore)
+        XCTAssertEqual(mainRowAction(row: 99, isInBounds: false), .ignore)
+    }
+
+    func testMainRowActionExecutionRequiresSelectableMenuItemAndElement() {
+        XCTAssertEqual(mainRowAction(row: 3, isSelectable: false), .ignore)
+        XCTAssertEqual(mainRowAction(row: 3, hasMenuItem: false), .ignore)
+        XCTAssertEqual(mainRowAction(row: 3, hasElement: false), .ignore)
+    }
+
+    func testMainRowActionExecutionPerformsAndDismissesForValidRows() {
+        XCTAssertEqual(mainRowAction(row: 3), .perform(row: 3, dismissAfterAction: true))
+    }
+
+    func testMainRowActionExecutionInvalidFactsWinEvenWithElementFacts() {
+        XCTAssertEqual(
+            mainRowAction(row: 3, isInBounds: false, isSelectable: true, hasMenuItem: true, hasElement: true),
+            .ignore
+        )
+        XCTAssertEqual(
+            mainRowAction(row: 3, isSelectable: false, hasMenuItem: true, hasElement: true),
+            .ignore
+        )
+        XCTAssertEqual(
+            mainRowAction(row: 3, hasMenuItem: false, hasElement: true),
+            .ignore
+        )
+    }
+
+    func testSubmenuRowActionExecutionInvalidRowsIgnore() {
+        XCTAssertEqual(submenuRowAction(row: -1, isInBounds: false), .ignore)
+        XCTAssertEqual(submenuRowAction(row: 99, isInBounds: false), .ignore)
+    }
+
+    func testSubmenuRowActionExecutionRequiresSelectableElement() {
+        XCTAssertEqual(submenuRowAction(row: 3, isSelectable: false), .ignore)
+        XCTAssertEqual(submenuRowAction(row: 3, hasElement: false), .ignore)
+    }
+
+    func testSubmenuRowActionExecutionPerformsWithoutDismissForValidRows() {
+        XCTAssertEqual(submenuRowAction(row: 3), .perform(row: 3, dismissAfterAction: false))
+    }
+
+    func testSubmenuRowActionExecutionInvalidFactsWinEvenWithElementFacts() {
+        XCTAssertEqual(
+            submenuRowAction(row: 3, isInBounds: false, isSelectable: true, hasElement: true),
+            .ignore
+        )
+        XCTAssertEqual(
+            submenuRowAction(row: 3, isSelectable: false, hasElement: true),
+            .ignore
+        )
+    }
+
+    func testSubmenuRowActionExecutionDoesNotRequireLeafFacts() {
+        // There is intentionally no hasSubmenu input: current executeActionAtRow
+        // behavior performs any selectable row that has an AX element.
+        XCTAssertEqual(submenuRowAction(row: 3, hasElement: true), .perform(row: 3, dismissAfterAction: false))
+    }
+
     func testMainResetPlanForCollapseEndingTrackingClearsWithoutFlash() {
         XCTAssertEqual(
             MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: true)),
@@ -1203,6 +1264,36 @@ final class MenuInteractionStateTests: XCTestCase {
             childSubmenuRow: childSubmenuRow,
             hasSubmenu: hasSubmenu,
             hasExtractedSubmenuItems: hasExtractedSubmenuItems,
+            hasElement: hasElement
+        )
+    }
+
+    private func mainRowAction(
+        row: Int,
+        isInBounds: Bool = true,
+        isSelectable: Bool = true,
+        hasMenuItem: Bool = true,
+        hasElement: Bool = true
+    ) -> RowActionExecutionIntent {
+        MenuInteractionPolicy.mainRowActionExecutionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            hasMenuItem: hasMenuItem,
+            hasElement: hasElement
+        )
+    }
+
+    private func submenuRowAction(
+        row: Int,
+        isInBounds: Bool = true,
+        isSelectable: Bool = true,
+        hasElement: Bool = true
+    ) -> RowActionExecutionIntent {
+        MenuInteractionPolicy.submenuRowActionExecutionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
             hasElement: hasElement
         )
     }
