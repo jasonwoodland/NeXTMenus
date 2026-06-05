@@ -547,6 +547,19 @@ final class MenuInteractionStateTests: XCTestCase {
         )
     }
 
+    func testSubmenuOutsideClickAttachedOutsideChainHidesAttachedChain() {
+        XCTAssertEqual(submenuOutsideClick(clickInsideChain: false), .hideAttachedChain)
+    }
+
+    func testSubmenuOutsideClickAttachedInsideOwnOrDescendantChainIgnores() {
+        XCTAssertEqual(submenuOutsideClick(clickInsideChain: true), .ignore)
+    }
+
+    func testSubmenuOutsideClickTornOffIgnoresInsideAndOutsideChain() {
+        XCTAssertEqual(submenuOutsideClick(isTornOff: true, clickInsideChain: false), .ignore)
+        XCTAssertEqual(submenuOutsideClick(isTornOff: true, clickInsideChain: true), .ignore)
+    }
+
     func testMainResetPlanForCollapseEndingTrackingClearsWithoutFlash() {
         XCTAssertEqual(
             MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: true)),
@@ -1094,6 +1107,16 @@ final class MenuInteractionStateTests: XCTestCase {
             childSubmenuRow: childSubmenuRow,
             hasSubmenu: hasSubmenu,
             hasRestorableDetachedSubmenu: hasRestorableDetachedSubmenu
+        )
+    }
+
+    private func submenuOutsideClick(
+        isTornOff: Bool = false,
+        clickInsideChain: Bool
+    ) -> SubmenuOutsideClickIntent {
+        MenuInteractionPolicy.submenuOutsideClickIntent(
+            isTornOff: isTornOff,
+            clickInsideChain: clickInsideChain
         )
     }
 

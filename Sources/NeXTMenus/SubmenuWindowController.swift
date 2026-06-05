@@ -451,12 +451,19 @@ class SubmenuWindowController: NSWindowController {
 
     private func setupGlobalClickMonitor() {
         // Monitor global mouse clicks
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self = self, !self.isTornOff else { return }
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self = self else { return }
 
-            // Check if click is outside this window
-            if let screenClickLocation = NSEvent.mouseLocation as CGPoint?,
-               !self.submenuWindow.frame.contains(screenClickLocation) {
+            let screenClickLocation = NSEvent.mouseLocation
+            let intent = MenuInteractionPolicy.submenuOutsideClickIntent(
+                isTornOff: self.isTornOff,
+                clickInsideChain: self.containsScreenPointInChain(screenClickLocation)
+            )
+
+            switch intent {
+            case .ignore:
+                return
+            case .hideAttachedChain:
                 // Click was outside - clear highlights and close the submenu
                 self.childSubmenuController?.hideWindow()
                 self.childSubmenuController = nil

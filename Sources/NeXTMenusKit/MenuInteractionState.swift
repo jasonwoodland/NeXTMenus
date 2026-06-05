@@ -43,6 +43,11 @@ public enum SubmenuMouseUpIntent: Equatable {
     case performLeafAction(clearHover: Bool)
 }
 
+public enum SubmenuOutsideClickIntent: Equatable {
+    case ignore
+    case hideAttachedChain
+}
+
 public enum MainMouseDownAction: Equatable {
     case none
     case updateHighlights
@@ -425,6 +430,15 @@ public enum MenuInteractionPolicy {
             pressedDetachedSubmenuRow: pressedDetachedSubmenuRow,
             action: .handleSubmenuPress(row: row, updateTornOffPressHighlight: isTornOff)
         )
+    }
+
+    public static func submenuOutsideClickIntent(
+        isTornOff: Bool,
+        clickInsideChain: Bool
+    ) -> SubmenuOutsideClickIntent {
+        guard !isTornOff else { return .ignore }
+        guard !clickInsideChain else { return .ignore }
+        return .hideAttachedChain
     }
 
     public static func mainOpenSubmenuIntent(
