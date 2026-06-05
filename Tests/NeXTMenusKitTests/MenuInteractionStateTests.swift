@@ -560,6 +560,73 @@ final class MenuInteractionStateTests: XCTestCase {
         XCTAssertEqual(submenuOutsideClick(isTornOff: true, clickInsideChain: true), .ignore)
     }
 
+    func testSubmenuClickedRowActionInvalidRowsIgnore() {
+        XCTAssertEqual(submenuClicked(row: -1, isInBounds: false), .ignore)
+        XCTAssertEqual(submenuClicked(row: 99, isInBounds: false), .ignore)
+        XCTAssertEqual(submenuClicked(row: 3, isSelectable: false), .ignore)
+    }
+
+    func testSubmenuClickedRowActionAlreadyOpenChildIgnoresBeforeSubmenuOrElementFacts() {
+        XCTAssertEqual(
+            submenuClicked(
+                row: 3,
+                childSubmenuRow: 3,
+                hasSubmenu: true,
+                hasExtractedSubmenuItems: true,
+                hasElement: true
+            ),
+            .ignore
+        )
+    }
+
+    func testSubmenuClickedRowActionPresentsExtractedSubmenus() {
+        XCTAssertEqual(
+            submenuClicked(row: 3, hasSubmenu: true, hasExtractedSubmenuItems: true),
+            .presentSubmenu(row: 3)
+        )
+        XCTAssertEqual(
+            submenuClicked(
+                row: 3,
+                childSubmenuRow: 2,
+                hasSubmenu: true,
+                hasExtractedSubmenuItems: true
+            ),
+            .presentSubmenu(row: 3)
+        )
+    }
+
+    func testSubmenuClickedRowActionFallsBackToLeafActionWhenExtractedSubmenuIsEmpty() {
+        XCTAssertEqual(
+            submenuClicked(
+                row: 3,
+                hasSubmenu: true,
+                hasExtractedSubmenuItems: false,
+                hasElement: true
+            ),
+            .performLeafAction(row: 3)
+        )
+        XCTAssertEqual(
+            submenuClicked(
+                row: 3,
+                hasSubmenu: true,
+                hasExtractedSubmenuItems: false,
+                hasElement: false
+            ),
+            .ignore
+        )
+    }
+
+    func testSubmenuClickedRowActionLeafRowsRequireElement() {
+        XCTAssertEqual(
+            submenuClicked(row: 3, hasSubmenu: false, hasExtractedSubmenuItems: false, hasElement: true),
+            .performLeafAction(row: 3)
+        )
+        XCTAssertEqual(
+            submenuClicked(row: 3, hasSubmenu: false, hasExtractedSubmenuItems: false, hasElement: false),
+            .ignore
+        )
+    }
+
     func testMainResetPlanForCollapseEndingTrackingClearsWithoutFlash() {
         XCTAssertEqual(
             MenuInteractionPolicy.mainResetPlan(for: .collapse(endsTracking: true)),
@@ -1117,6 +1184,26 @@ final class MenuInteractionStateTests: XCTestCase {
         MenuInteractionPolicy.submenuOutsideClickIntent(
             isTornOff: isTornOff,
             clickInsideChain: clickInsideChain
+        )
+    }
+
+    private func submenuClicked(
+        row: Int,
+        isInBounds: Bool = true,
+        isSelectable: Bool = true,
+        childSubmenuRow: Int? = nil,
+        hasSubmenu: Bool = true,
+        hasExtractedSubmenuItems: Bool = true,
+        hasElement: Bool = false
+    ) -> SubmenuClickedRowActionIntent {
+        MenuInteractionPolicy.submenuClickedRowActionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            childSubmenuRow: childSubmenuRow,
+            hasSubmenu: hasSubmenu,
+            hasExtractedSubmenuItems: hasExtractedSubmenuItems,
+            hasElement: hasElement
         )
     }
 

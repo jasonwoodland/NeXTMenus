@@ -1820,24 +1820,39 @@ extension SubmenuWindowController: NSTableViewDelegate {
     }
 
     private func handleMouseClickedRow(_ row: Int) {
-        // Check if row is selectable (not disabled or separator)
-        guard tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false else {
-            return
+        let isInBounds = row >= 0 && row < visibleMenuItems.count
+        // Check if row is selectable (not disabled or separator). Keep the
+        // delegate lookup after the bounds check because the delegate indexes
+        // visibleMenuItems[row].
+        let isSelectable = isInBounds
+            && (tableView.delegate?.tableView?(tableView, shouldSelectRow: row) ?? false)
+        let menuItem = isSelectable ? visibleMenuItems[row] : nil
+
+        let hasExtractedSubmenuItems: Bool
+        if let menuItem, childSubmenuRow != row, menuItem.hasSubmenu {
+            hasExtractedSubmenuItems = !MenuExtractor.submenuItems(for: menuItem).isEmpty
+        } else {
+            hasExtractedSubmenuItems = false
         }
 
-        let menuItem = visibleMenuItems[row]
+        let intent = MenuInteractionPolicy.submenuClickedRowActionIntent(
+            row: row,
+            isInBounds: isInBounds,
+            isSelectable: isSelectable,
+            childSubmenuRow: childSubmenuRow,
+            hasSubmenu: menuItem?.hasSubmenu ?? false,
+            hasExtractedSubmenuItems: hasExtractedSubmenuItems,
+            hasElement: menuItem?.element != nil
+        )
 
-        // Clicking the item whose submenu is already open is handled by the
-        // mouse-up path. Attached submenus no-op; torn-off submenus close on
-        // release so the press itself does not flicker the child closed/open.
-        if childSubmenuRow == row {
+        switch intent {
+        case .ignore:
             return
-        }
-
-        let submenuItems = menuItem.hasSubmenu ? MenuExtractor.submenuItems(for: menuItem) : []
-        if !submenuItems.isEmpty {
+        case .presentSubmenu(let row):
+            guard let menuItem else { return }
             presentSubmenu(for: menuItem, at: row)
-        } else if let element = menuItem.element {
+        case .performLeafAction(let row):
+            guard let element = menuItem?.element else { return }
             // Leaf item - flash, perform the action, collapse the chain
             performAction(element, at: row)
         }
