@@ -1,10 +1,14 @@
 import Cocoa
 import ApplicationServices
+#if SWIFT_PACKAGE
+import NeXTMenusKit
+#endif
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var menuWindowControllers: [pid_t: MenuWindowController] = [:]
     var applicationObserver: ApplicationObserver?
     private var visibleMenuPid: pid_t?
+    private var pendingMenuExtractionRetryPids = Set<pid_t>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Hide the app from the Dock
@@ -57,6 +61,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let controller = menuWindowControllers.removeValue(forKey: app.processIdentifier) {
             controller.hideWindow()
         }
+        pendingMenuExtractionRetryPids.remove(app.processIdentifier)
         if visibleMenuPid == app.processIdentifier {
             visibleMenuPid = nil
         }
@@ -92,6 +97,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let menuWindowController: MenuWindowController
         if let existing = menuWindowControllers[pid] {
             menuWindowController = existing
+            if MenuRefreshPolicy.shouldRetryCachedTopLevelMenu(
+                extractedTopLevelMenuItemCount: existing.topLevelMenuItemCount,
+                isRetryPending: pendingMenuExtractionRetryPids.contains(pid)
+            ) {
+                retryMenuExtraction(for: app, attempt: 0)
+            }
         } else {
             // Extract menu items from the application
             let (appMenuItem, menuItems) = MenuExtractor.extractMenuItems(from: app)
@@ -151,17 +162,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Re-reads an app's menu bar until it's populated. The accessibility menu
     // bar can be empty briefly right after an app launches.
     private func retryMenuExtraction(for app: NSRunningApplication, attempt: Int) {
-        guard attempt < 24, !app.isTerminated else { return }
+        let pid = app.processIdentifier
+        if attempt == 0 {
+            guard !pendingMenuExtractionRetryPids.contains(pid) else { return }
+            pendingMenuExtractionRetryPids.insert(pid)
+        }
+
+        guard attempt < 24, !app.isTerminated else {
+            pendingMenuExtractionRetryPids.remove(pid)
+            return
+        }
+
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            guard let self = self,
-                  let controller = self.menuWindowControllers[app.processIdentifier],
-                  !app.isTerminated else { return }
+            guard let self = self else { return }
+            guard !app.isTerminated else {
+                self.pendingMenuExtractionRetryPids.remove(pid)
+                return
+            }
+            guard let controller = self.menuWindowControllers[pid] else {
+                self.pendingMenuExtractionRetryPids.remove(pid)
+                return
+            }
 
             let (appMenuItem, menuItems) = MenuExtractor.extractMenuItems(from: app)
-            if menuItems.isEmpty {
-                self.retryMenuExtraction(for: app, attempt: attempt + 1)
-            } else {
+            if MenuRefreshPolicy.shouldApplyTopLevelMenuRetryResult(
+                extractedTopLevelMenuItemCount: menuItems.count
+            ) {
                 controller.applyFullMenu(appMenuItem: appMenuItem, menuItems: menuItems)
+                self.pendingMenuExtractionRetryPids.remove(pid)
+            } else {
+                self.retryMenuExtraction(for: app, attempt: attempt + 1)
             }
         }
     }

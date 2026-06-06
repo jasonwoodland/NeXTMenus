@@ -11,6 +11,11 @@ class MenuWindowController: NSWindowController {
     private var appMenuItem: MenuItem?
     private var appName: String = ""
     private var targetApp: NSRunningApplication?
+
+    var topLevelMenuItemCount: Int {
+        menuItems.count
+    }
+
     private let rowHeight: CGFloat = 24
     private let titleBarHeight: CGFloat = 28
     private let windowWidth: CGFloat = 180
@@ -840,6 +845,7 @@ class MenuWindowController: NSWindowController {
         self.menuItems = menuItems
         menuItemsVersion += 1
         invalidateVisibleMenuItemsCache()
+        resetInteractionStateForVisibleItemsChange()
         tableView.reloadData()
         resizeWindowToFitContent()
     }
