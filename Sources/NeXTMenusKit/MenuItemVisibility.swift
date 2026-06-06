@@ -20,18 +20,28 @@ public enum MenuItemVisibility {
     public static func visibleItems(from menuItems: [MenuItem],
                                     modifierState: MenuModifierState,
                                     trimSeparators: Bool) -> [MenuItem] {
-        var filtered: [MenuItem] = []
+        visibleItemIndices(
+            from: menuItems,
+            modifierState: modifierState,
+            trimSeparators: trimSeparators
+        ).map { menuItems[$0] }
+    }
+
+    public static func visibleItemIndices(from menuItems: [MenuItem],
+                                          modifierState: MenuModifierState,
+                                          trimSeparators: Bool) -> [Int] {
+        var filtered: [Int] = []
         filtered.reserveCapacity(menuItems.count)
 
         for (index, item) in menuItems.enumerated() {
             if item.isSeparator {
-                filtered.append(item)
+                filtered.append(index)
                 continue
             }
 
             if item.isAlternate {
                 if matches(item.requiredModifiers, state: modifierState) {
-                    filtered.append(item)
+                    filtered.append(index)
                 }
                 continue
             }
@@ -45,21 +55,25 @@ public enum MenuItemVisibility {
             }()
 
             if !alternateShown {
-                filtered.append(item)
+                filtered.append(index)
             }
         }
 
         guard trimSeparators else { return filtered }
 
-        var result: [MenuItem] = []
+        var result: [Int] = []
         result.reserveCapacity(filtered.count)
-        for item in filtered {
-            if item.isSeparator && (result.last?.isSeparator ?? true) {
-                continue
+        for index in filtered {
+            let item = menuItems[index]
+            if item.isSeparator {
+                let previousIsSeparator = result.last.map { menuItems[$0].isSeparator } ?? true
+                if previousIsSeparator {
+                    continue
+                }
             }
-            result.append(item)
+            result.append(index)
         }
-        if result.last?.isSeparator == true {
+        if let last = result.last, menuItems[last].isSeparator {
             result.removeLast()
         }
         return result

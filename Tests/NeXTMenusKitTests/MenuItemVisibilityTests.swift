@@ -92,6 +92,39 @@ final class MenuItemVisibilityTests: XCTestCase {
         XCTAssertEqual(visibleItems.map(\.isSeparator), [false, true, false])
     }
 
+    func testVisibleItemIndicesTrackSourceRowsThroughAlternatesDuplicatesAndTrimmedSeparators() {
+        let items = [
+            makeSeparator(),
+            makeItem(title: "Window A", cmdChar: "1"),
+            makeItem(
+                title: "Window A",
+                requiredModifiers: .option,
+                isAlternate: true,
+                alternateTitle: "Window A",
+                cmdChar: "1"
+            ),
+            makeSeparator(),
+            makeSeparator(),
+            makeItem(title: "Window A", cmdChar: "2", markChar: "◆"),
+            makeItem(title: "Window B", cmdChar: "3", markChar: "✓"),
+            makeSeparator()
+        ]
+
+        let defaultIndices = MenuItemVisibility.visibleItemIndices(
+            from: items,
+            modifierState: MenuModifierState(flags: []),
+            trimSeparators: true
+        )
+        let optionIndices = MenuItemVisibility.visibleItemIndices(
+            from: items,
+            modifierState: MenuModifierState(flags: [.option]),
+            trimSeparators: true
+        )
+
+        XCTAssertEqual(defaultIndices, [1, 3, 5, 6])
+        XCTAssertEqual(optionIndices, [2, 3, 5, 6])
+    }
+
     private func makeItem(
         title: String,
         isEnabled: Bool = true,

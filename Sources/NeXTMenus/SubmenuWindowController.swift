@@ -1503,7 +1503,7 @@ class SubmenuWindowController: NSWindowController {
     }
 
     private func rememberCheckableItems() {
-        for item in menuItems where item.markChar != nil {
+        for item in menuItems where isExclusiveCheckmark(item.markChar) {
             checkableItemKeys.insert(checkableKey(for: item))
         }
     }
@@ -1515,42 +1515,43 @@ class SubmenuWindowController: NSWindowController {
               let sourceIndex = sourceMenuItemIndex(forVisibleRow: row) else { return false }
 
         let key = checkableKey(for: menuItems[sourceIndex])
-        guard menuItems[sourceIndex].markChar != nil || checkableItemKeys.contains(key) else { return false }
+        let result = TornOffMenuMarkPolicy.optimisticUpdate(
+            items: menuItems,
+            clickedIndex: sourceIndex,
+            isKnownCheckable: checkableItemKeys.contains(key)
+        )
+        guard result.handled else { return false }
 
-        if menuItems[sourceIndex].markChar == nil {
-            menuItems[sourceIndex].markChar = "✓"
-            checkableItemKeys.insert(key)
-        } else {
-            menuItems[sourceIndex].markChar = nil
+        if result.changed {
+            menuItems = result.items
+            if isExclusiveCheckmark(menuItems[sourceIndex].markChar) {
+                checkableItemKeys.insert(key)
+            }
+            menuItemsVersion += 1
+            invalidateVisibleMenuItemsCache()
+            tableView.reloadData()
+            updateAllRowHighlights()
         }
-        menuItemsVersion += 1
-        invalidateVisibleMenuItemsCache()
-        tableView.reloadData()
-        updateAllRowHighlights()
         return true
     }
 
     private func sourceMenuItemIndex(forVisibleRow row: Int) -> Int? {
-        guard row >= 0, row < visibleMenuItems.count else { return nil }
-        let visibleItem = visibleMenuItems[row]
-        let visibleKey = checkableKey(for: visibleItem)
-
-        return menuItems.indices.first { index in
-            let item = menuItems[index]
-            if let visibleElement = visibleItem.element,
-               let itemElement = item.element,
-               CFEqual(itemElement, visibleElement) {
-                return true
-            }
-            return checkableKey(for: item) == visibleKey
-                && item.title == visibleItem.title
-                && item.isSeparator == visibleItem.isSeparator
-                && item.isAlternate == visibleItem.isAlternate
-        }
+        let visibleSourceIndices = MenuItemVisibility.visibleItemIndices(
+            from: menuItems,
+            modifierState: MenuModifierState(flags: currentModifierFlags),
+            trimSeparators: true
+        )
+        guard row >= 0, row < visibleSourceIndices.count else { return nil }
+        return visibleSourceIndices[row]
     }
 
     private func checkableKey(for item: MenuItem) -> String {
         "\(item.title)|\(item.cmdChar ?? "")|\(item.cmdModifiers ?? -1)"
+    }
+
+    private func isExclusiveCheckmark(_ markChar: String?) -> Bool {
+        guard let markChar else { return false }
+        return markChar.trimmingCharacters(in: .whitespacesAndNewlines) == "✓"
     }
 
     private func refreshTornOffMenuItemsAfterAction() {
