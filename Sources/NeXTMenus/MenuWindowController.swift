@@ -1377,11 +1377,13 @@ extension MenuWindowController: NSTableViewDelegate {
         case .ignore:
             return
         case .perform(_, let shouldDismissAfterAction):
-            guard let element else { return }
+            guard let element, let menuItem else { return }
             // Execute action
-            targetApp?.activate(options: [])
-            usleep(50000)
-            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            MenuActionDispatcher.perform(
+                actionKind: menuItem.actionKind,
+                on: element,
+                targetApp: targetApp
+            )
             if shouldDismissAfterAction {
                 dismissAfterAction()
             }
@@ -1411,9 +1413,14 @@ extension MenuWindowController: NSTableViewDelegate {
             return
         }
 
-        // Use the pre-extracted submenu tree (falls back to on-demand)
-        let submenuItems = MenuExtractor.submenuItems(for: menuItem)
-        showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: element)
+        // Use the pre-extracted submenu tree (falls back to on-demand). Window
+        // menus use a no-press path that merges already-exposed native rows
+        // with synthesized AXWindow rows.
+        let submenuItems = Self.submenuItemsForPresentation(for: menuItem, targetApp: targetApp)
+        let fallbackElement = WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title)
+            ? nil
+            : element
+        showSubmenu(for: menuItem, at: row, submenuItems: submenuItems, fallbackElement: fallbackElement)
     }
 
     private func openSubmenuFromDragAsync(forRow row: Int) {
@@ -1443,8 +1450,9 @@ extension MenuWindowController: NSTableViewDelegate {
             updateAllRowHighlights()
         case .startAsyncOpen(let row):
             guard let menuItem else { return }
+            let targetApp = self.targetApp
             DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-                let submenuItems = MenuExtractor.submenuItems(for: menuItem)
+                let submenuItems = Self.submenuItemsForPresentation(for: menuItem, targetApp: targetApp)
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     guard MenuInteractionPolicy.shouldPresentMainAsyncDragSubmenu(
@@ -1483,10 +1491,29 @@ extension MenuWindowController: NSTableViewDelegate {
             updateAllRowHighlights()
         } else if let element = fallbackElement {
             // No submenu - this is an action item, execute it
-            targetApp?.activate(options: [])
-            usleep(50000) // 50ms - let activation complete
-            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            MenuActionDispatcher.perform(
+                actionKind: menuItem.actionKind,
+                on: element,
+                targetApp: targetApp
+            )
             dismissAfterAction()
         }
+    }
+
+    private static func submenuItemsForPresentation(
+        for menuItem: MenuItem,
+        targetApp: NSRunningApplication?
+    ) -> [MenuItem] {
+        guard WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title) else {
+            return MenuExtractor.submenuItems(for: menuItem)
+        }
+
+        let nativeItems = MenuExtractor.submenuItemsWithoutOpeningNativeMenu(for: menuItem)
+        let windowItems = targetApp.map { MenuExtractor.synthesizedWindowItems(for: $0) } ?? []
+        return WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: menuItem.title,
+            existingItems: nativeItems,
+            synthesizedWindowItems: windowItems
+        )
     }
 }

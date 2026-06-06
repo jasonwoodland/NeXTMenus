@@ -26,6 +26,11 @@ let package = Package(
             name: "NeXTMenusKitTests",
             dependencies: ["NeXTMenusKit"],
             path: "Tests/NeXTMenusKitTests"
+        ),
+        .testTarget(
+            name: "NeXTMenusTests",
+            dependencies: ["NeXTMenus"],
+            path: "Tests/NeXTMenusTests"
         )
     ]
 )

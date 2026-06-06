@@ -569,7 +569,12 @@ class SubmenuWindowController: NSWindowController {
         // Re-extract submenu items when modifiers change
         // This is necessary because macOS provides different items based on modifiers
         if let parentMenuItem = getParentMenuItem(), let element = parentMenuItem.element {
-            let newSubmenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
+            let newSubmenuItems: [MenuItem]
+            if parentMenuItem.title == "Window", let targetApp {
+                newSubmenuItems = Self.submenuItemsForPresentation(for: parentMenuItem, targetApp: targetApp)
+            } else {
+                newSubmenuItems = MenuExtractor.extractSubmenuItemsOnDemand(from: element)
+            }
             if !newSubmenuItems.isEmpty {
                 self.menuItems = newSubmenuItems
                 menuItemsVersion += 1
@@ -1332,7 +1337,7 @@ class SubmenuWindowController: NSWindowController {
     // Opens menuItem's submenu at the given row, reusing the existing child
     // window when one is already on screen so switching is instant.
     private func presentSubmenu(for menuItem: MenuItem, at row: Int) {
-        let submenuItems = MenuExtractor.submenuItems(for: menuItem)
+        let submenuItems = Self.submenuItemsForPresentation(for: menuItem, targetApp: targetApp)
         guard !submenuItems.isEmpty else { return }
 
         if let child = childSubmenuController {
@@ -1347,6 +1352,28 @@ class SubmenuWindowController: NSWindowController {
         }
         childSubmenuRow = row
         updateAllRowHighlights()
+    }
+
+    private static func submenuItemsForPresentation(
+        for menuItem: MenuItem,
+        targetApp: NSRunningApplication?
+    ) -> [MenuItem] {
+        guard WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title) else {
+            return MenuExtractor.submenuItems(for: menuItem)
+        }
+
+        let nativeItems = MenuExtractor.submenuItemsWithoutOpeningNativeMenu(for: menuItem)
+        let windowItems = targetApp.map { MenuExtractor.synthesizedWindowItems(for: $0) } ?? []
+        return WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: menuItem.title,
+            existingItems: nativeItems,
+            synthesizedWindowItems: windowItems
+        )
+    }
+
+    private func actionKindForVisibleRow(_ row: Int) -> MenuItemActionKind {
+        guard row >= 0, row < visibleMenuItems.count else { return .pressMenuItem }
+        return visibleMenuItems[row].actionKind
     }
 
     // Creates a child submenu controller and wires up its callbacks.
@@ -1423,11 +1450,19 @@ class SubmenuWindowController: NSWindowController {
     private func performAction(_ element: AXUIElement, at row: Int) {
         if isTornOff {
             closeSubmenu()
-            rememberCheckableItems()
-            AXUIElementPerformAction(element, kAXPressAction as CFString)
-            let didOptimisticallyToggle = optimisticallyToggleMarkIfNeeded(at: row)
-            if !didOptimisticallyToggle {
-                refreshTornOffMenuItemsAfterAction()
+            let actionKind = actionKindForVisibleRow(row)
+            MenuActionDispatcher.perform(
+                actionKind: actionKind,
+                on: element,
+                targetApp: targetApp,
+                delayAfterActivation: false
+            )
+            if actionKind == .pressMenuItem {
+                rememberCheckableItems()
+                let didOptimisticallyToggle = optimisticallyToggleMarkIfNeeded(at: row)
+                if !didOptimisticallyToggle {
+                    refreshTornOffMenuItemsAfterAction()
+                }
             }
             updateAllRowHighlights()
             return
@@ -1435,9 +1470,11 @@ class SubmenuWindowController: NSWindowController {
 
         flashRow(row) { [weak self] in
             guard let self = self else { return }
-            self.targetApp?.activate(options: [])
-            usleep(50000)
-            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            MenuActionDispatcher.perform(
+                actionKind: self.actionKindForVisibleRow(row),
+                on: element,
+                targetApp: self.targetApp
+            )
             self.dismissChain?()
         }
     }
@@ -1830,10 +1867,18 @@ extension SubmenuWindowController: NSTableViewDelegate {
 
         let hasExtractedSubmenuItems: Bool
         if let menuItem, childSubmenuRow != row, menuItem.hasSubmenu {
-            hasExtractedSubmenuItems = !MenuExtractor.submenuItems(for: menuItem).isEmpty
+            hasExtractedSubmenuItems = !Self.submenuItemsForPresentation(
+                for: menuItem,
+                targetApp: targetApp
+            ).isEmpty
         } else {
             hasExtractedSubmenuItems = false
         }
+
+        let suppressesEmptySubmenuFallback = menuItem.map {
+            $0.hasSubmenu
+                && WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: $0.title)
+        } ?? false
 
         let intent = MenuInteractionPolicy.submenuClickedRowActionIntent(
             row: row,
@@ -1842,7 +1887,7 @@ extension SubmenuWindowController: NSTableViewDelegate {
             childSubmenuRow: childSubmenuRow,
             hasSubmenu: menuItem?.hasSubmenu ?? false,
             hasExtractedSubmenuItems: hasExtractedSubmenuItems,
-            hasElement: menuItem?.element != nil
+            hasElement: menuItem?.element != nil && !suppressesEmptySubmenuFallback
         )
 
         switch intent {
@@ -1951,11 +1996,13 @@ extension SubmenuWindowController: NSTableViewDelegate {
         case .ignore:
             return
         case .perform:
-            guard let element else { return }
+            guard let element, let menuItem else { return }
             // Execute action
-            targetApp?.activate(options: [])
-            usleep(50000)
-            AXUIElementPerformAction(element, kAXPressAction as CFString)
+            MenuActionDispatcher.perform(
+                actionKind: menuItem.actionKind,
+                on: element,
+                targetApp: targetApp
+            )
         }
     }
 

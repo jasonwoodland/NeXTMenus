@@ -204,6 +204,73 @@ class MenuExtractor {
         return extractSubmenuItemsOnDemand(from: element)
     }
 
+    // Reads already-exposed submenu children without pressing/opening the
+    // native menu. Use this for Window-menu augmentation so NeXTMenus never
+    // opens native macOS menus just to populate dynamic rows.
+    static func submenuItemsWithoutOpeningNativeMenu(for menuItem: MenuItem) -> [MenuItem] {
+        if !menuItem.submenuItems.isEmpty {
+            return menuItem.submenuItems
+        }
+        guard let element = menuItem.element else { return [] }
+
+        var childrenValue: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXChildrenAttribute as CFString,
+            &childrenValue
+        )
+        guard result == .success,
+              let children = childrenValue as? [AXUIElement],
+              !children.isEmpty else {
+            return []
+        }
+        return extractSubmenuItems(from: children)
+    }
+
+    static func synthesizedWindowItems(for app: NSRunningApplication) -> [MenuItem] {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowsValue: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            appElement,
+            kAXWindowsAttribute as CFString,
+            &windowsValue
+        )
+        guard result == .success,
+              let windows = windowsValue as? [AXUIElement],
+              !windows.isEmpty else {
+            return []
+        }
+
+        let focused = focusedWindow(for: app)
+        var seenTitles = Set<String>()
+        return windows.compactMap { window in
+            var titleValue: AnyObject?
+            AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleValue)
+            guard let title = titleValue as? String else { return nil }
+            let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedTitle.isEmpty, seenTitles.insert(trimmedTitle).inserted else { return nil }
+
+            let isFocused = focused.map { CFEqual(window, $0) } ?? false
+            return MenuItem(
+                title: trimmedTitle,
+                isEnabled: true,
+                hasSubmenu: false,
+                isSeparator: false,
+                element: window,
+                submenuItems: [],
+                keyEquivalent: nil,
+                requiredModifiers: nil,
+                isAlternate: false,
+                alternateTitle: nil,
+                cmdGlyph: nil,
+                markChar: isFocused ? "✓" : nil,
+                cmdChar: nil,
+                cmdModifiers: nil,
+                actionKind: .raiseAXWindow
+            )
+        }
+    }
+
     static func extractSubmenuItems(from children: [AXUIElement]) -> [MenuItem] {
         var allItems: [MenuItem] = []
 
