@@ -26,6 +26,7 @@ public struct MenuItem {
     public let cmdChar: String? // kAXMenuItemCmdChar - raw shortcut character (used to detect alternates)
     public let cmdModifiers: Int? // kAXMenuItemCmdModifiers - raw modifier mask (used to detect alternates)
     public let actionKind: MenuItemActionKind
+    public let axIdentifier: String?
 
     public init(
         title: String,
@@ -42,7 +43,8 @@ public struct MenuItem {
         markChar: String?,
         cmdChar: String?,
         cmdModifiers: Int?,
-        actionKind: MenuItemActionKind = .pressMenuItem
+        actionKind: MenuItemActionKind = .pressMenuItem,
+        axIdentifier: String? = nil
     ) {
         self.title = title
         self.isEnabled = isEnabled
@@ -59,5 +61,6 @@ public struct MenuItem {
         self.cmdChar = cmdChar
         self.cmdModifiers = cmdModifiers
         self.actionKind = actionKind
+        self.axIdentifier = axIdentifier
     }
 }

@@ -1358,17 +1358,7 @@ class SubmenuWindowController: NSWindowController {
         for menuItem: MenuItem,
         targetApp: NSRunningApplication?
     ) -> [MenuItem] {
-        guard WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title) else {
-            return MenuExtractor.submenuItems(for: menuItem)
-        }
-
-        let nativeItems = MenuExtractor.submenuItemsWithoutOpeningNativeMenu(for: menuItem)
-        let windowItems = targetApp.map { MenuExtractor.synthesizedWindowItems(for: $0) } ?? []
-        return WindowSubmenuSynthesis.augmentedItems(
-            menuTitle: menuItem.title,
-            existingItems: nativeItems,
-            synthesizedWindowItems: windowItems
-        )
+        WindowSubmenuPresentation.submenuItems(for: menuItem, targetApp: targetApp)
     }
 
     private func actionKindForVisibleRow(_ row: Int) -> MenuItemActionKind {

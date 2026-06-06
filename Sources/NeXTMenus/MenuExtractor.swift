@@ -5,6 +5,14 @@ import NeXTMenusKit
 #endif
 
 class MenuExtractor {
+    private static func axIdentifier(for element: AXUIElement) -> String? {
+        var identifierValue: AnyObject?
+        AXUIElementCopyAttributeValue(element, "AXIdentifier" as CFString, &identifierValue)
+        guard let identifier = identifierValue as? String else { return nil }
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private static func focusedWindow(for app: NSRunningApplication) -> AXUIElement? {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var focusedWindowRef: AnyObject?
@@ -125,7 +133,8 @@ class MenuExtractor {
             cmdGlyph: nil,
             markChar: nil,
             cmdChar: nil,
-            cmdModifiers: nil
+            cmdModifiers: nil,
+            axIdentifier: axIdentifier(for: element)
         )
     }
 
@@ -423,7 +432,8 @@ class MenuExtractor {
                 cmdGlyph: cmdGlyph,
                 markChar: markChar,
                 cmdChar: keyChar,
-                cmdModifiers: modifiers
+                cmdModifiers: modifiers,
+                axIdentifier: axIdentifier(for: child)
             ))
         }
 

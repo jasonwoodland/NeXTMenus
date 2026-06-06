@@ -1451,6 +1451,9 @@ extension MenuWindowController: NSTableViewDelegate {
         case .startAsyncOpen(let row):
             guard let menuItem else { return }
             let targetApp = self.targetApp
+            if WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title) {
+                _ = StaticMenuMetadataLoader.metadataItems(for: targetApp)
+            }
             DispatchQueue.global(qos: .userInteractive).async { [weak self] in
                 let submenuItems = Self.submenuItemsForPresentation(for: menuItem, targetApp: targetApp)
                 DispatchQueue.main.async { [weak self] in
@@ -1504,16 +1507,6 @@ extension MenuWindowController: NSTableViewDelegate {
         for menuItem: MenuItem,
         targetApp: NSRunningApplication?
     ) -> [MenuItem] {
-        guard WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: menuItem.title) else {
-            return MenuExtractor.submenuItems(for: menuItem)
-        }
-
-        let nativeItems = MenuExtractor.submenuItemsWithoutOpeningNativeMenu(for: menuItem)
-        let windowItems = targetApp.map { MenuExtractor.synthesizedWindowItems(for: $0) } ?? []
-        return WindowSubmenuSynthesis.augmentedItems(
-            menuTitle: menuItem.title,
-            existingItems: nativeItems,
-            synthesizedWindowItems: windowItems
-        )
+        WindowSubmenuPresentation.submenuItems(for: menuItem, targetApp: targetApp)
     }
 }
