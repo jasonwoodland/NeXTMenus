@@ -22,7 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start observing active application changes
         applicationObserver = ApplicationObserver { [weak self] runningApp in
-            self?.handleActiveApplicationChange(runningApp)
+            self?.handleObservedApplicationChange(runningApp)
         }
 
         // Re-evaluate fullscreen visibility on space changes (entering /
@@ -83,6 +83,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !accessibilityEnabled {
             print("Please grant accessibility permissions in System Preferences > Security & Privacy > Privacy > Accessibility")
         }
+    }
+
+    private func handleObservedApplicationChange(_ app: NSRunningApplication) {
+        handleActiveApplicationChange(app)
+        menuWindowControllers[app.processIdentifier]?.refreshOpenWindowSubmenus()
     }
 
     private func handleActiveApplicationChange(_ app: NSRunningApplication) {

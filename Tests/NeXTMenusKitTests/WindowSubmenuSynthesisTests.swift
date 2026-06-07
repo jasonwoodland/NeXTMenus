@@ -154,6 +154,50 @@ final class WindowSubmenuSynthesisTests: XCTestCase {
         XCTAssertEqual(result.first?.axIdentifier, "_NS:64")
     }
 
+    func testDuplicateNativeOpenWindowRowClearsStaleDiamondWhenCurrentWindowIsUnmarked() {
+        let existing = [
+            makeMenuItem(
+                "Scan",
+                markChar: "◆",
+                actionKind: .pressMenuItem,
+                axIdentifier: "makeKeyAndOrderFront:"
+            )
+        ]
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [makeWindowItem("Scan", markChar: nil)]
+        )
+
+        XCTAssertEqual(result.map(\.title), ["Scan"])
+        XCTAssertNil(result.first?.markChar)
+        XCTAssertEqual(result.first?.actionKind, .pressMenuItem)
+        XCTAssertEqual(result.first?.axIdentifier, "makeKeyAndOrderFront:")
+    }
+
+    func testDuplicateNativeOpenWindowRowUsesCurrentSynthesizedCheckmark() {
+        let existing = [
+            makeMenuItem(
+                "Scan",
+                markChar: "◆",
+                actionKind: .pressMenuItem,
+                axIdentifier: "makeKeyAndOrderFront:"
+            )
+        ]
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [makeWindowItem("Scan", markChar: "✓")]
+        )
+
+        XCTAssertEqual(result.map(\.title), ["Scan"])
+        XCTAssertEqual(result.first?.markChar, "✓")
+        XCTAssertEqual(result.first?.actionKind, .pressMenuItem)
+        XCTAssertEqual(result.first?.axIdentifier, "makeKeyAndOrderFront:")
+    }
+
     private func makeMenuItem(
         _ title: String,
         isSeparator: Bool = false,

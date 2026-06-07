@@ -850,6 +850,14 @@ class MenuWindowController: NSWindowController {
         resizeWindowToFitContent()
     }
 
+    func refreshOpenWindowSubmenus() {
+        childSubmenuController?.refreshWindowSubmenusRecursively()
+        pruneDetachedSubmenus()
+        for detachedSubmenu in detachedSubmenus {
+            detachedSubmenu.controller.refreshWindowSubmenusRecursively()
+        }
+    }
+
     // Total height of all rows, read from the table's actual layout geometry
     // rather than recomputed from row counts.
     private func tableContentHeight() -> CGFloat {

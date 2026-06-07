@@ -1334,6 +1334,39 @@ class SubmenuWindowController: NSWindowController {
         resizeWindowToFitContent(resetScrollToTop: true)
     }
 
+    func refreshWindowSubmenusRecursively() {
+        if WindowSubmenuSynthesis.usesNonPressingWindowPresentation(menuTitle: title),
+           let parentMenuItem,
+           let targetApp {
+            let refreshedItems = Self.submenuItemsForPresentation(
+                for: parentMenuItem,
+                targetApp: targetApp
+            )
+            if !refreshedItems.isEmpty {
+                applyRefreshedMenuItems(refreshedItems)
+            }
+        }
+
+        childSubmenuController?.refreshWindowSubmenusRecursively()
+        pruneDetachedSubmenus()
+        for detachedSubmenu in detachedSubmenus {
+            detachedSubmenu.controller.refreshWindowSubmenusRecursively()
+        }
+    }
+
+    private func applyRefreshedMenuItems(_ refreshedItems: [MenuItem]) {
+        menuItems = refreshedItems
+        checkableItemKeys.removeAll()
+        rememberCheckableItems()
+        menuItemsVersion += 1
+        invalidateVisibleMenuItemsCache()
+        windowWidth = Self.computeContentWidth(for: refreshedItems)
+        tableView.tableColumns.first?.width = windowWidth
+        tableView.reloadData()
+        resizeWindowToFitContent(resetScrollToTop: false)
+        updateAllRowHighlights()
+    }
+
     // Opens menuItem's submenu at the given row, reusing the existing child
     // window when one is already on screen so switching is instant.
     private func presentSubmenu(for menuItem: MenuItem, at row: Int) {

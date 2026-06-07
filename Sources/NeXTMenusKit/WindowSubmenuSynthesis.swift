@@ -52,25 +52,21 @@ public enum WindowSubmenuSynthesis {
         _ existingItems: [MenuItem],
         with synthesizedWindowItems: [MenuItem]
     ) -> [MenuItem] {
-        let minimizedMarksByTitle = synthesizedWindowItems.reduce(into: [String: String]()) { result, item in
-            guard !item.isSeparator,
-                  !item.title.isEmpty,
-                  normalizedMinimizedMark(item.markChar) != nil else {
-                return
-            }
-            result[item.title] = minimizedWindowMark
+        let windowMarksByTitle = synthesizedWindowItems.reduce(into: [String: String?]()) { result, item in
+            guard !item.isSeparator, !item.title.isEmpty else { return }
+            result.updateValue(normalizedWindowMark(item.markChar), forKey: item.title)
         }
 
-        guard !minimizedMarksByTitle.isEmpty else { return existingItems }
+        guard !windowMarksByTitle.isEmpty else { return existingItems }
 
         return existingItems.map { item in
             guard isNativeOpenWindowRow(item),
-                  let minimizedMark = minimizedMarksByTitle[item.title] else {
+                  let currentMark = windowMarksByTitle[item.title] else {
                 return item
             }
 
             var annotatedItem = item
-            annotatedItem.markChar = minimizedMark
+            annotatedItem.markChar = currentMark
             return annotatedItem
         }
     }
@@ -90,11 +86,10 @@ public enum WindowSubmenuSynthesis {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func normalizedMinimizedMark(_ markChar: String?) -> String? {
+    private static func normalizedWindowMark(_ markChar: String?) -> String? {
         guard let markChar else { return nil }
-        return markChar.trimmingCharacters(in: .whitespacesAndNewlines) == minimizedWindowMark
-            ? minimizedWindowMark
-            : nil
+        let trimmed = markChar.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func separator() -> MenuItem {
