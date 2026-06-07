@@ -18,7 +18,7 @@ struct NeXTMenusSettings {
     }
 
     static var topLeftInset: CGFloat {
-        useZeroTopLeftInset ? 0 : 8
+        useZeroTopLeftInset ? 0 : 6
     }
 
     static var showServicesInMainMenu: Bool {
