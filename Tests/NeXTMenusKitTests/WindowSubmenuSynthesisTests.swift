@@ -238,6 +238,98 @@ final class WindowSubmenuSynthesisTests: XCTestCase {
         XCTAssertEqual(result[2].axIdentifier, "_NS:59")
     }
 
+    func testNativeOpenWindowRowsReorderByFocusedWindowTabOrderWithinExistingGroup() {
+        let existing = [
+            makeMenuItem("Minimize"),
+            makeSeparator(),
+            makeMenuItem("Quote", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Strict", markChar: "◆", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Inference", markChar: "✓", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Bring All to Front", actionKind: .pressMenuItem, axIdentifier: "_NS:27")
+        ]
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [],
+            orderedWindowTitles: ["Inference", "Quote", "Strict"]
+        )
+
+        XCTAssertEqual(result.map(\.title), [
+            "Minimize", "", "Inference", "Quote", "Strict", "Bring All to Front"
+        ])
+        XCTAssertEqual(result[2].markChar, "✓")
+        XCTAssertEqual(result[2].actionKind, .pressMenuItem)
+        XCTAssertEqual(result[2].axIdentifier, "makeKeyAndOrderFront:")
+        XCTAssertNil(result[3].markChar)
+        XCTAssertEqual(result[4].markChar, "◆")
+        XCTAssertEqual(result[5].axIdentifier, "_NS:27")
+    }
+
+    func testNativeOpenWindowRowsStayUnchangedWithoutTabOrder() {
+        let existing = makeOutOfOrderNativeWindowRows()
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [],
+            orderedWindowTitles: []
+        )
+
+        XCTAssertEqual(result.map(\.title), existing.map(\.title))
+    }
+
+    func testNativeOpenWindowRowsStayUnchangedForMissingTabTitle() {
+        let existing = makeOutOfOrderNativeWindowRows()
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [],
+            orderedWindowTitles: ["Inference", "Strict"]
+        )
+
+        XCTAssertEqual(result.map(\.title), existing.map(\.title))
+    }
+
+    func testNativeOpenWindowRowsStayUnchangedForDuplicateTabTitles() {
+        let existing = makeOutOfOrderNativeWindowRows()
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [],
+            orderedWindowTitles: ["Inference", "Quote", "Quote"]
+        )
+
+        XCTAssertEqual(result.map(\.title), existing.map(\.title))
+    }
+
+    func testNativeOpenWindowRowsStayUnchangedForDuplicateNativeWindowTitles() {
+        let existing = [
+            makeMenuItem("Quote", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Quote", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Inference", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:")
+        ]
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [],
+            orderedWindowTitles: ["Inference", "Quote"]
+        )
+
+        XCTAssertEqual(result.map(\.title), existing.map(\.title))
+    }
+
+    private func makeOutOfOrderNativeWindowRows() -> [MenuItem] {
+        [
+            makeMenuItem("Quote", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Strict", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:"),
+            makeMenuItem("Inference", actionKind: .pressMenuItem, axIdentifier: "makeKeyAndOrderFront:")
+        ]
+    }
+
     private func makeMenuItem(
         _ title: String,
         isSeparator: Bool = false,

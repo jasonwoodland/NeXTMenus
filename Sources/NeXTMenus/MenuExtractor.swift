@@ -284,6 +284,76 @@ class MenuExtractor {
         }
     }
 
+    static func orderedWindowTabTitles(for app: NSRunningApplication) -> [String] {
+        guard let focusedWindow = focusedWindow(for: app) else { return [] }
+        let tabGroups = tabGroups(in: focusedWindow)
+        let titleGroups = tabGroups.compactMap { orderedTabTitles(in: $0) }
+        guard titleGroups.count == 1 else { return [] }
+        return titleGroups[0]
+    }
+
+    private static func tabGroups(in root: AXUIElement) -> [AXUIElement] {
+        var result = [AXUIElement]()
+        var stack = Array(children(of: root).reversed())
+
+        while let element = stack.popLast() {
+            let role = stringAttribute(element, kAXRoleAttribute as CFString)
+            if role == kAXTabGroupRole as String {
+                result.append(element)
+                continue
+            }
+            stack.append(contentsOf: children(of: element).reversed())
+        }
+
+        return result
+    }
+
+    private static func orderedTabTitles(in tabGroup: AXUIElement) -> [String]? {
+        var tabsValue: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            tabGroup,
+            kAXTabsAttribute as CFString,
+            &tabsValue
+        )
+        guard result == .success,
+              let tabs = tabsValue as? [AXUIElement],
+              !tabs.isEmpty else {
+            return nil
+        }
+
+        var titles = [String]()
+        var seen = Set<String>()
+        for tab in tabs {
+            guard let rawTitle = stringAttribute(tab, kAXTitleAttribute as CFString) else {
+                return nil
+            }
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, seen.insert(title).inserted else {
+                return nil
+            }
+            titles.append(title)
+        }
+        return titles
+    }
+
+    private static func children(of element: AXUIElement) -> [AXUIElement] {
+        var childrenValue: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            kAXChildrenAttribute as CFString,
+            &childrenValue
+        )
+        guard result == .success, let children = childrenValue as? [AXUIElement] else { return [] }
+        return children
+    }
+
+    private static func stringAttribute(_ element: AXUIElement, _ attribute: CFString) -> String? {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success else { return nil }
+        return value as? String
+    }
+
     private static func minimizedWindowState(for window: AXUIElement) -> Bool {
         var minimizedValue: AnyObject?
         let result = AXUIElementCopyAttributeValue(

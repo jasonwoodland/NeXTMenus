@@ -17,11 +17,13 @@ enum WindowSubmenuPresentation {
             nativeItems,
             using: StaticMenuMetadataLoader.metadataItems(for: targetApp)
         )
+        let orderedWindowTitles = targetApp.map { MenuExtractor.orderedWindowTabTitles(for: $0) } ?? []
         let windowItems = targetApp.map { MenuExtractor.synthesizedWindowItems(for: $0) } ?? []
         return WindowSubmenuSynthesis.augmentedItems(
             menuTitle: menuItem.title,
             existingItems: repairedNativeItems,
-            synthesizedWindowItems: windowItems
+            synthesizedWindowItems: windowItems,
+            orderedWindowTitles: orderedWindowTitles
         )
     }
 }
