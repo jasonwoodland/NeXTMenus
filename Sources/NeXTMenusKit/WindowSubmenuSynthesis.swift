@@ -1,6 +1,17 @@
+import Foundation
+
 public enum WindowSubmenuSynthesis {
+    private static let nativeOpenWindowIdentifier = "makeKeyAndOrderFront:"
+    private static let minimizedWindowMark = "◆"
+
     public static func usesNonPressingWindowPresentation(menuTitle: String) -> Bool {
         menuTitle == "Window"
+    }
+
+    public static func windowMarkChar(isFocused: Bool, isMinimized: Bool) -> String? {
+        if isMinimized { return minimizedWindowMark }
+        if isFocused { return "✓" }
+        return nil
     }
 
     public static func augmentedItems(
@@ -10,8 +21,12 @@ public enum WindowSubmenuSynthesis {
     ) -> [MenuItem] {
         guard usesNonPressingWindowPresentation(menuTitle: menuTitle) else { return existingItems }
 
+        let annotatedExistingItems = annotateNativeOpenWindowRows(
+            existingItems,
+            with: synthesizedWindowItems
+        )
         let existingTitles = Set(
-            existingItems
+            annotatedExistingItems
                 .filter { !$0.isSeparator }
                 .map(\.title)
                 .filter { !$0.isEmpty }
@@ -22,15 +37,64 @@ public enum WindowSubmenuSynthesis {
                 && !existingTitles.contains(item.title)
         }
 
-        guard !missingWindowItems.isEmpty else { return existingItems }
-        guard !existingItems.isEmpty else { return missingWindowItems }
+        guard !missingWindowItems.isEmpty else { return annotatedExistingItems }
+        guard !annotatedExistingItems.isEmpty else { return missingWindowItems }
 
-        var result = existingItems
+        var result = annotatedExistingItems
         if result.last?.isSeparator != true {
             result.append(separator())
         }
         result.append(contentsOf: missingWindowItems)
         return result
+    }
+
+    private static func annotateNativeOpenWindowRows(
+        _ existingItems: [MenuItem],
+        with synthesizedWindowItems: [MenuItem]
+    ) -> [MenuItem] {
+        let minimizedMarksByTitle = synthesizedWindowItems.reduce(into: [String: String]()) { result, item in
+            guard !item.isSeparator,
+                  !item.title.isEmpty,
+                  normalizedMinimizedMark(item.markChar) != nil else {
+                return
+            }
+            result[item.title] = minimizedWindowMark
+        }
+
+        guard !minimizedMarksByTitle.isEmpty else { return existingItems }
+
+        return existingItems.map { item in
+            guard isNativeOpenWindowRow(item),
+                  let minimizedMark = minimizedMarksByTitle[item.title] else {
+                return item
+            }
+
+            var annotatedItem = item
+            annotatedItem.markChar = minimizedMark
+            return annotatedItem
+        }
+    }
+
+    private static func isNativeOpenWindowRow(_ item: MenuItem) -> Bool {
+        guard !item.isSeparator,
+              item.actionKind == .pressMenuItem,
+              normalizedIdentifier(item.axIdentifier) == nativeOpenWindowIdentifier else {
+            return false
+        }
+        return true
+    }
+
+    private static func normalizedIdentifier(_ identifier: String?) -> String? {
+        guard let identifier else { return nil }
+        let trimmed = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func normalizedMinimizedMark(_ markChar: String?) -> String? {
+        guard let markChar else { return nil }
+        return markChar.trimmingCharacters(in: .whitespacesAndNewlines) == minimizedWindowMark
+            ? minimizedWindowMark
+            : nil
     }
 
     private static func separator() -> MenuItem {

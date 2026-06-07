@@ -260,6 +260,7 @@ class MenuExtractor {
             guard !trimmedTitle.isEmpty, seenTitles.insert(trimmedTitle).inserted else { return nil }
 
             let isFocused = focused.map { CFEqual(window, $0) } ?? false
+            let isMinimized = minimizedWindowState(for: window)
             return MenuItem(
                 title: trimmedTitle,
                 isEnabled: true,
@@ -272,12 +273,26 @@ class MenuExtractor {
                 isAlternate: false,
                 alternateTitle: nil,
                 cmdGlyph: nil,
-                markChar: isFocused ? "✓" : nil,
+                markChar: WindowSubmenuSynthesis.windowMarkChar(
+                    isFocused: isFocused,
+                    isMinimized: isMinimized
+                ),
                 cmdChar: nil,
                 cmdModifiers: nil,
                 actionKind: .raiseAXWindow
             )
         }
+    }
+
+    private static func minimizedWindowState(for window: AXUIElement) -> Bool {
+        var minimizedValue: AnyObject?
+        let result = AXUIElementCopyAttributeValue(
+            window,
+            kAXMinimizedAttribute as CFString,
+            &minimizedValue
+        )
+        guard result == .success else { return false }
+        return (minimizedValue as? Bool) ?? false
     }
 
     static func extractSubmenuItems(from children: [AXUIElement]) -> [MenuItem] {
