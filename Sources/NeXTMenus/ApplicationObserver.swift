@@ -2,6 +2,38 @@ import Cocoa
 import ApplicationServices
 
 class ApplicationObserver {
+    static let appElementNotificationNames = [
+        kAXFocusedWindowChangedNotification as String,
+        kAXWindowCreatedNotification as String,
+        kAXMainWindowChangedNotification as String
+    ]
+
+    static let focusedWindowMovementNotificationNames = [
+        kAXMovedNotification as String,
+        kAXResizedNotification as String
+    ]
+
+    static let observedWindowNotificationNames = [
+        kAXWindowMiniaturizedNotification as String,
+        kAXWindowDeminiaturizedNotification as String,
+        kAXTitleChangedNotification as String,
+        kAXSelectedChildrenChangedNotification as String
+    ]
+
+    static func shouldUpdateFocusedWindowMovementObservation(for notificationName: String) -> Bool {
+        notificationName == kAXFocusedWindowChangedNotification as String
+            || notificationName == kAXMainWindowChangedNotification as String
+    }
+
+    static func shouldRefreshObservedWindowSet(for notificationName: String) -> Bool {
+        notificationName == kAXFocusedWindowChangedNotification as String
+            || notificationName == kAXMainWindowChangedNotification as String
+            || notificationName == kAXWindowCreatedNotification as String
+            || notificationName == kAXWindowMiniaturizedNotification as String
+            || notificationName == kAXWindowDeminiaturizedNotification as String
+            || notificationName == kAXSelectedChildrenChangedNotification as String
+    }
+
     private var callback: (NSRunningApplication) -> Void
     private var focusedWindowObserver: AXObserver?
     private var observedFocusedWindowPid: pid_t?
@@ -44,10 +76,10 @@ class ApplicationObserver {
                 guard let app = NSWorkspace.shared.frontmostApplication,
                       app.processIdentifier == observer.observedFocusedWindowPid else { return }
                 let notificationName = notification as String
-                if notificationName == kAXFocusedWindowChangedNotification {
+                if ApplicationObserver.shouldUpdateFocusedWindowMovementObservation(for: notificationName) {
                     observer.updateFocusedWindowMovementObservation(for: app)
                 }
-                if observer.shouldRefreshObservedWindowSet(for: notificationName) {
+                if ApplicationObserver.shouldRefreshObservedWindowSet(for: notificationName) {
                     observer.updateWindowStateObservation(for: app)
                 }
                 observer.callback(app)
@@ -64,11 +96,10 @@ class ApplicationObserver {
         )
         guard addFocusedResult == .success else { return }
 
-        AXObserverAddNotification(
-            observer,
-            appElement,
-            kAXWindowCreatedNotification as CFString,
-            Unmanaged.passUnretained(self).toOpaque()
+        addNotifications(
+            Self.appElementNotificationNames.filter { $0 != kAXFocusedWindowChangedNotification as String },
+            to: appElement,
+            observer: observer
         )
 
         focusedWindowObserver = observer
@@ -79,36 +110,17 @@ class ApplicationObserver {
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
     }
 
-    private func shouldRefreshObservedWindowSet(for notificationName: String) -> Bool {
-        notificationName == kAXFocusedWindowChangedNotification as String
-            || notificationName == kAXWindowCreatedNotification as String
-            || notificationName == kAXWindowMiniaturizedNotification as String
-            || notificationName == kAXWindowDeminiaturizedNotification as String
-    }
-
     private func updateFocusedWindowMovementObservation(for app: NSRunningApplication) {
         guard let observer = focusedWindowObserver,
               app.processIdentifier == observedFocusedWindowPid else { return }
 
         if let window = observedFocusedWindow {
-            AXObserverRemoveNotification(observer, window, kAXMovedNotification as CFString)
-            AXObserverRemoveNotification(observer, window, kAXResizedNotification as CFString)
+            removeNotifications(Self.focusedWindowMovementNotificationNames, from: window, observer: observer)
         }
         observedFocusedWindow = nil
 
         guard let window = focusedWindow(for: app) else { return }
-        AXObserverAddNotification(
-            observer,
-            window,
-            kAXMovedNotification as CFString,
-            Unmanaged.passUnretained(self).toOpaque()
-        )
-        AXObserverAddNotification(
-            observer,
-            window,
-            kAXResizedNotification as CFString,
-            Unmanaged.passUnretained(self).toOpaque()
-        )
+        addNotifications(Self.focusedWindowMovementNotificationNames, to: window, observer: observer)
         observedFocusedWindow = window
     }
 
@@ -116,28 +128,37 @@ class ApplicationObserver {
         guard let observer = focusedWindowObserver,
               app.processIdentifier == observedFocusedWindowPid else { return }
 
-        removeWindowStateNotifications(from: observedWindows, observer: observer)
+        for window in observedWindows {
+            removeNotifications(Self.observedWindowNotificationNames, from: window, observer: observer)
+        }
         observedWindows = windows(for: app)
         for window in observedWindows {
+            addNotifications(Self.observedWindowNotificationNames, to: window, observer: observer)
+        }
+    }
+
+    private func addNotifications(
+        _ notificationNames: [String],
+        to element: AXUIElement,
+        observer: AXObserver
+    ) {
+        for notificationName in notificationNames {
             AXObserverAddNotification(
                 observer,
-                window,
-                kAXWindowMiniaturizedNotification as CFString,
-                Unmanaged.passUnretained(self).toOpaque()
-            )
-            AXObserverAddNotification(
-                observer,
-                window,
-                kAXWindowDeminiaturizedNotification as CFString,
+                element,
+                notificationName as CFString,
                 Unmanaged.passUnretained(self).toOpaque()
             )
         }
     }
 
-    private func removeWindowStateNotifications(from windows: [AXUIElement], observer: AXObserver) {
-        for window in windows {
-            AXObserverRemoveNotification(observer, window, kAXWindowMiniaturizedNotification as CFString)
-            AXObserverRemoveNotification(observer, window, kAXWindowDeminiaturizedNotification as CFString)
+    private func removeNotifications(
+        _ notificationNames: [String],
+        from element: AXUIElement,
+        observer: AXObserver
+    ) {
+        for notificationName in notificationNames {
+            AXObserverRemoveNotification(observer, element, notificationName as CFString)
         }
     }
 
@@ -165,22 +186,14 @@ class ApplicationObserver {
     private func stopObservingFocusedWindowChanges() {
         if let observer = focusedWindowObserver {
             if let appElement = observedAppElement {
-                AXObserverRemoveNotification(
-                    observer,
-                    appElement,
-                    kAXFocusedWindowChangedNotification as CFString
-                )
-                AXObserverRemoveNotification(
-                    observer,
-                    appElement,
-                    kAXWindowCreatedNotification as CFString
-                )
+                removeNotifications(Self.appElementNotificationNames, from: appElement, observer: observer)
             }
             if let window = observedFocusedWindow {
-                AXObserverRemoveNotification(observer, window, kAXMovedNotification as CFString)
-                AXObserverRemoveNotification(observer, window, kAXResizedNotification as CFString)
+                removeNotifications(Self.focusedWindowMovementNotificationNames, from: window, observer: observer)
             }
-            removeWindowStateNotifications(from: observedWindows, observer: observer)
+            for window in observedWindows {
+                removeNotifications(Self.observedWindowNotificationNames, from: window, observer: observer)
+            }
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
         }
         focusedWindowObserver = nil

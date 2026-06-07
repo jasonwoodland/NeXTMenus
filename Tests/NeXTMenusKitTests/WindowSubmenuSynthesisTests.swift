@@ -198,6 +198,46 @@ final class WindowSubmenuSynthesisTests: XCTestCase {
         XCTAssertEqual(result.first?.axIdentifier, "makeKeyAndOrderFront:")
     }
 
+    func testNativeOpenWindowRowsMoveCurrentMarkWithoutChangingCommandRows() {
+        let existing = [
+            makeMenuItem(
+                "Scan",
+                markChar: "✓",
+                actionKind: .pressMenuItem,
+                axIdentifier: "makeKeyAndOrderFront:"
+            ),
+            makeMenuItem(
+                "Logs",
+                actionKind: .pressMenuItem,
+                axIdentifier: "makeKeyAndOrderFront:"
+            ),
+            makeMenuItem(
+                "Logs",
+                actionKind: .pressMenuItem,
+                axIdentifier: "_NS:59"
+            )
+        ]
+
+        let result = WindowSubmenuSynthesis.augmentedItems(
+            menuTitle: "Window",
+            existingItems: existing,
+            synthesizedWindowItems: [
+                makeWindowItem("Scan", markChar: nil),
+                makeWindowItem("Logs", markChar: "✓")
+            ]
+        )
+
+        XCTAssertEqual(result.map(\.title), ["Scan", "Logs", "Logs"])
+        XCTAssertNil(result[0].markChar)
+        XCTAssertEqual(result[0].actionKind, .pressMenuItem)
+        XCTAssertEqual(result[0].axIdentifier, "makeKeyAndOrderFront:")
+        XCTAssertEqual(result[1].markChar, "✓")
+        XCTAssertEqual(result[1].actionKind, .pressMenuItem)
+        XCTAssertEqual(result[1].axIdentifier, "makeKeyAndOrderFront:")
+        XCTAssertNil(result[2].markChar)
+        XCTAssertEqual(result[2].axIdentifier, "_NS:59")
+    }
+
     private func makeMenuItem(
         _ title: String,
         isSeparator: Bool = false,
